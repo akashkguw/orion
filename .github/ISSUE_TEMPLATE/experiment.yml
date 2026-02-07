@@ -1,6 +1,6 @@
 name: Experiment
 description: Track a run plan (sweep, ablation, benchmark).
-title: ""
+title: "Experiment"
 labels: ["type:experiment"]
 body:
   - type: input
