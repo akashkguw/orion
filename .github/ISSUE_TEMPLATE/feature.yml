@@ -1,6 +1,6 @@
 name: Feature
 description: Implement a new capability or enhancement.
-title: ""
+title: "Feature"
 labels: ["type:feat"]
 body:
   - type: input
