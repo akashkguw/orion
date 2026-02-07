@@ -1,0 +1,22 @@
+name: Feature
+description: Implement a new capability or enhancement.
+title: ""
+labels: ["type:feat"]
+body:
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: "Add sliding-window causal attention backend."
+    validations:
+      required: true
+
+  - type: textarea
+    id: ac
+    attributes:
+      label: Acceptance Criteria
+      value: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
