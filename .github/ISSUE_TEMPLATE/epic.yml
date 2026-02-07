@@ -1,0 +1,42 @@
+name: Epic
+description: Track a large body of work that contains multiple issues.
+title: "Epic: "
+labels: ["epic"]
+body:
+  - type: input
+    id: goal
+    attributes:
+      label: Goal
+      placeholder: "Ship structured sparse attention backend with tests and benchmarks."
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope (In / Out)
+      value: |
+        **In:**
+        - 
+        **Out:**
+        - 
+    validations:
+      required: true
+
+  - type: textarea
+    id: dod
+    attributes:
+      label: Definition of Done
+      value: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+
+  - type: textarea
+    id: child
+    attributes:
+      label: Child issues
+      description: "Add links later like: - [ ] #123"
+      value: |
+        - [ ] #
