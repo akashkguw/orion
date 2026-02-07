@@ -1,0 +1,19 @@
+Title,Type,Labels,Milestone
+Epic: Repository + training infrastructure,Epic,"epic,area:infra,prio:p0",M0
+Initialize repo structure,Issue,"type:feat,area:infra,prio:p0",M0
+Config system + CLI,Issue,"type:feat,area:infra,prio:p0",M0
+Training loop + checkpointing,Issue,"type:feat,area:infra,prio:p0",M0
+Baseline dense model,Issue,"type:feat,area:model,prio:p0",M0
+Epic: Structured sparse attention,Epic,"epic,area:sparse-attn,prio:p0",M1
+Sliding-window causal attention,Issue,"type:feat,area:sparse-attn,prio:p0",M0
+Implement window+expander sparse mask,Issue,"type:feat,area:sparse-attn,prio:p0",M1
+Sparse attention correctness tests,Issue,"type:feat,area:sparse-attn,prio:p0",M1
+Sparse attention smoke training,Issue,"type:experiment,area:sparse-attn,prio:p1",M1
+Epic: Norm control / stability,Epic,"epic,area:stability,prio:p0",M3
+Add QK-norm toggle,Issue,"type:feat,area:stability,prio:p0",M3
+Add orthogonal init option,Issue,"type:feat,area:stability,prio:p1",M3
+Add spectral normalization (targeted),Issue,"type:feat,area:stability,prio:p1",M3
+Epic: Evaluation + reporting,Epic,"epic,area:eval,prio:p0",M5
+Standard run logging format,Issue,"type:feat,area:eval,prio:p0",M0
+"Performance benchmark utility (tok/s, VRAM)",Issue,"type:feat,area:eval,prio:p1",M1
+Plot generation scripts,Issue,"type:feat,area:eval,prio:p1",M4
