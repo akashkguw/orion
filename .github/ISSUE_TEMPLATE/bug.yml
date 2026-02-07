@@ -1,6 +1,6 @@
 name: Bug
 description: Report something broken.
-title: ""
+title: "Bug"
 labels: ["type:bug"]
 body:
   - type: input
