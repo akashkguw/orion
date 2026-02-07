@@ -1,0 +1,33 @@
+name: Experiment
+description: Track a run plan (sweep, ablation, benchmark).
+title: ""
+labels: ["type:experiment"]
+body:
+  - type: input
+    id: question
+    attributes:
+      label: Question
+      placeholder: "Does QK-norm improve stability at long context?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: plan
+    attributes:
+      label: Plan
+      value: |
+        **Configs:** 
+        **Budget:** 
+        **Seeds:** 
+        **Metrics:** 
+    validations:
+      required: true
+
+  - type: textarea
+    id: success
+    attributes:
+      label: Success criteria
+      value: |
+        - 
+    validations:
+      required: true
