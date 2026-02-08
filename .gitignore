@@ -42,8 +42,8 @@ tensorboard/
 mlruns/
 
 # Data (keep local by default)
-data/
-datasets/
+/data/
+/datasets/
 *.bin
 *.pt
 *.pth
