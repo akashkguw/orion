@@ -1,8 +1,6 @@
 # orion
 A research repo for long-context, decoder-only Transformers using structured sparse attention (sliding window + expander links) and stability controls (QK-norm, orthogonal init, spectral normalization). Includes reproducible training/eval configs and benchmarks across 512–4K context lengths for quality, throughput, VRAM, and training stability
 
-# Orion
-
 This README includes the exact **Google Colab** steps we use to install, train, eval, and check logs.
 
 ---
@@ -93,25 +91,6 @@ pip install torch
 python -m orion.train --config configs/golden.yaml
 python -m orion.eval --config configs/golden.yaml --checkpoint runs/latest/checkpoint.pt
 ```
-
----
-
-## Troubleshooting
-
-### YAML parse error: `found character '`' that cannot start any token`
-Your `configs/golden.yaml` contains Markdown (backticks like ```yaml or headings like `###`). Ensure the file contains **only YAML**.
-
-### Code blocks render wrong on GitHub (shows ```bash literally)
-You used quotes like `'''bash` instead of triple backticks. Replace `'''` with ```.
-
-### `ModuleNotFoundError: torch`
-Install torch in the environment you are running:
-
-```bash
-pip install torch
-```
-
----
 
 ## License
 
