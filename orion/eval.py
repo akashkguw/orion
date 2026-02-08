@@ -26,7 +26,19 @@ def main():
     n_heads = int(cfg.get("model", "n_heads", default=4))
     mlp_mult = int(cfg.get("model", "mlp_mult", default=4))
 
-    model = TinyDecoderOnly(vocab_size, d_model, n_layers, n_heads, mlp_mult).to(device)
+    model_name = str(cfg.get("model", "name", default="tiny"))
+    from .models_factory import build_model
+
+    model = build_model(
+        name=model_name,
+        vocab_size=vocab_size,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        mlp_mult=mlp_mult,
+        device=device,
+    )
+    
     ckpt = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(ckpt["model"], strict=True)
     model.eval()

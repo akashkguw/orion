@@ -1,5 +1,5 @@
 run:
-  out_dir: runs/tinyshakespeare_smoke
+  out_dir: runs/exp_shakespeare_dense
   seed: 123
   steps: 200
   log_every: 10
@@ -17,6 +17,8 @@ model:
   n_layers: 4
   n_heads: 4
   mlp_mult: 4
-
-optim:
-  lr: 3e-4
+  
+attention:
+  backend: sparse
+  window_size: 256
+  expander_degree: 16

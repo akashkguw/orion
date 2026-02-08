@@ -1,0 +1,23 @@
+run:
+  out_dir: runs/exp_shakespeare_window
+  seed: 123
+  steps: 2000
+  log_every: 50
+  save_every: 2000
+
+data:
+  dataset: tinyshakespeare
+  root: data
+  seq_len: 256
+  batch_size: 16
+
+model:
+  name: tiny
+  d_model: 256
+  n_layers: 6
+  n_heads: 8
+  mlp_mult: 4
+
+attention:
+  backend: window
+  window_size: 256

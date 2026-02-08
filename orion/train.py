@@ -72,7 +72,19 @@ def main():
             return x, y
 
     # -------- Model / Optim --------
-    model = TinyDecoderOnly(vocab_size, d_model, n_layers, n_heads, mlp_mult).to(device)
+    model_name = str(cfg.get("model", "name", default="tiny"))
+    from .models_factory import build_model
+
+    model = build_model(
+        name=model_name,
+        vocab_size=vocab_size,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        mlp_mult=mlp_mult,
+        device=device,
+    )
+    
     opt = AdamW(model.parameters(), lr=float(cfg.get("optim", "lr", default=3e-4)))
 
     logger = JsonlLogger(out_dir / "metrics.jsonl")
