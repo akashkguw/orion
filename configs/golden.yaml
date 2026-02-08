@@ -1,0 +1,21 @@
+run:
+  out_dir: runs/latest
+  seed: 123
+  steps: 20
+  log_every: 1
+  save_every: 20
+
+data:
+  vocab_size: 256
+  seq_len: 128
+  batch_size: 8
+
+model:
+  d_model: 128
+  n_layers: 2
+  n_heads: 4
+  mlp_mult: 4
+
+optim:
+  lr: 3e-4
+

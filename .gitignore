@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Jupyter
+*.ipynb_checkpoints
+
+# Logs / artifacts
+*.log
+*.tmp
+
+# Orion outputs
+runs/
+artifacts/
+checkpoints/
+wandb/
+tensorboard/
+mlruns/
+
+# Data (keep local by default)
+data/
+datasets/
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+id_rsa
+id_ed25519
+
