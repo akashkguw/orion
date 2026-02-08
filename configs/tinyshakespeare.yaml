@@ -1,0 +1,21 @@
+run:
+  out_dir: runs/tinyshakespeare_smoke
+  seed: 123
+  steps: 200
+  log_every: 10
+  save_every: 200
+
+data:
+  dataset: tinyshakespeare
+  root: data
+  seq_len: 256
+  batch_size: 16
+
+model:
+  d_model: 256
+  n_layers: 4
+  n_heads: 4
+  mlp_mult: 4
+
+optim:
+  lr: 3e-4
