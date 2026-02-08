@@ -3,6 +3,7 @@ A research repo for long-context, decoder-only Transformers using structured spa
 
 This README includes the exact **Google Colab** steps we use to install, train, eval, and check logs.
 
+Latest Collab Link - https://colab.research.google.com/drive/1loF_wQVC2-tFcUZaBAK22Pz4mQKy9gvG#scrollTo=2mw0bvkX1nqj
 ---
 
 ## Google Colab: Run the boilerplate end-to-end
