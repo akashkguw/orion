@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 
 from orion.logging_utils import JsonlLogger
-from orion.model import TinyDecoderOnly, loss_fn
+from orion.model import TinyDecoderOnly
 
 
 def test_metrics_jsonl_format():
@@ -162,7 +162,7 @@ def test_checkpoint_model_state_dict():
         model2.load_state_dict(loaded["model"])
 
         # Verify weights match
-        for p1, p2 in zip(model.parameters(), model2.parameters()):
+        for p1, p2 in zip(model.parameters(), model2.parameters(), strict=True):
             assert torch.allclose(p1, p2)
 
 
