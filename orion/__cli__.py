@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import argparse
+
 
 def main():
     p = argparse.ArgumentParser(prog="orion")
@@ -22,10 +24,13 @@ def main():
 
     if args.cmd == "train":
         from orion.train.loop import main as train_main
+
         train_main()
     elif args.cmd == "eval":
         from orion.eval.eval import main as eval_main
+
         eval_main()
     else:
         from orion.bench.bench import main as bench_main
+
         bench_main()

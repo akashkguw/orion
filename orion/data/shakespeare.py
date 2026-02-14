@@ -1,15 +1,15 @@
 # orion/data/shakespeare.py
 from __future__ import annotations
 
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
-import urllib.request
 
 import torch
 
-
-SHAKESPEARE_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+SHAKESPEARE_URL = (
+    "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+)
 
 
 def _download_if_needed(path: Path) -> None:
@@ -25,7 +25,7 @@ class CharTokenizer:
     itos: list[str]
 
     @classmethod
-    def from_text(cls, text: str) -> "CharTokenizer":
+    def from_text(cls, text: str) -> CharTokenizer:
         chars = sorted(set(text))
         itos = chars
         stoi = {ch: i for i, ch in enumerate(chars)}
@@ -42,7 +42,9 @@ class CharTokenizer:
         return "".join(self.itos[i] for i in ids.tolist())
 
 
-def load_tiny_shakespeare(root: str | Path = "data") -> Tuple[torch.Tensor, torch.Tensor, CharTokenizer]:
+def load_tiny_shakespeare(
+    root: str | Path = "data",
+) -> tuple[torch.Tensor, torch.Tensor, CharTokenizer]:
     """
     Returns: (train_ids, val_ids, tokenizer)
     """

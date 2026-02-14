@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
+
 import torch
+
 
 @dataclass(frozen=True)
 class SparseMask:
@@ -11,9 +14,11 @@ class SparseMask:
     Recommended: store as per-token neighbor indices (ragged) or COO indices.
     Avoid dense [T,T] masks.
     """
+
     # Example placeholder fields;
     indices: Any  # TODO: define exact type (e.g., LongTensor [nnz, 2] or list[list[int]])
     shape: tuple[int, int]  # (T, T)
+
 
 def build_sparse_mask(
     T: int,
@@ -22,7 +27,7 @@ def build_sparse_mask(
     expander_degree: int,
     device: torch.device,
     seed: int = 0,
-    cache: Optional[dict] = None,
+    cache: dict | None = None,
 ) -> SparseMask:
     """
     Build a deterministic causal structured sparse mask combining:

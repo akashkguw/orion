@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import argparse
 import subprocess
 import sys
+
 
 def main() -> None:
     p = argparse.ArgumentParser(prog="orion")
@@ -25,7 +27,15 @@ def main() -> None:
         raise SystemExit(subprocess.call(cmd))
 
     if args.cmd == "eval":
-        cmd = [sys.executable, "-m", "orion.eval", "--config", args.config, "--checkpoint", args.checkpoint]
+        cmd = [
+            sys.executable,
+            "-m",
+            "orion.eval",
+            "--config",
+            args.config,
+            "--checkpoint",
+            args.checkpoint,
+        ]
         if args.device:
             cmd += ["--device", args.device]
         raise SystemExit(subprocess.call(cmd))

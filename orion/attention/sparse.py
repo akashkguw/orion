@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 import torch
+
 from .base import AttentionConfig
 from .mask.builder import SparseMask
+
 
 class SparseAttention:
     def __init__(self, cfg: AttentionConfig):

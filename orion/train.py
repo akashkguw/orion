@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from torch.optim import AdamW
 
 from .config import load_config
 from .logging_utils import JsonlLogger
-from .model import TinyDecoderOnly, loss_fn
+from .model import loss_fn
 
 
 def set_seed(seed: int) -> None:
@@ -51,6 +52,10 @@ def main():
     log_every = int(cfg.get("run", "log_every", default=1))
     save_every = int(cfg.get("run", "save_every", default=steps))
 
+    # Override steps if running smoke test
+    if os.getenv("SMOKE_TEST") == "true":
+        steps = int(os.getenv("SMOKE_STEPS", "20"))
+
     # -------- Dataset selection --------
     if dataset in {"tinyshakespeare", "shakespeare"}:
         from orion.data.shakespeare import load_tiny_shakespeare, sample_batch
@@ -84,7 +89,7 @@ def main():
         mlp_mult=mlp_mult,
         device=device,
     )
-    
+
     opt = AdamW(model.parameters(), lr=float(cfg.get("optim", "lr", default=3e-4)))
 
     logger = JsonlLogger(out_dir / "metrics.jsonl")
@@ -121,7 +126,13 @@ def main():
 
     # Always save last
     torch.save(
-        {"model": model.state_dict(), "opt": opt.state_dict(), "step": steps, "seed": seed, "config": cfg.raw},
+        {
+            "model": model.state_dict(),
+            "opt": opt.state_dict(),
+            "step": steps,
+            "seed": seed,
+            "config": cfg.raw,
+        },
         out_dir / "checkpoint.pt",
     )
 

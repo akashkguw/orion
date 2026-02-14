@@ -1,13 +1,15 @@
 from __future__ import annotations
+
 import torch
-from pathlib import Path
+
 from .config import load_config
-from .model import TinyDecoderOnly, loss_fn
+from .model import loss_fn
 
 
 @torch.no_grad()
 def main():
     import argparse
+
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
     p.add_argument("--checkpoint", required=True)
@@ -38,7 +40,7 @@ def main():
         mlp_mult=mlp_mult,
         device=device,
     )
-    
+
     ckpt = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(ckpt["model"], strict=True)
     model.eval()
@@ -53,4 +55,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

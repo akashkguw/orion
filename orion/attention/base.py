@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Protocol, Optional, Dict, Any
+from typing import Any, Protocol
+
 import torch
+
 
 @dataclass(frozen=True)
 class AttentionConfig:
@@ -10,6 +13,7 @@ class AttentionConfig:
     expander_degree: int | None = None  # d
     # add fields as needed (dropout, qk_norm toggle, etc.)
 
+
 class AttentionBackend(Protocol):
     def forward(
         self,
@@ -17,9 +21,10 @@ class AttentionBackend(Protocol):
         k: torch.Tensor,  # [B, H, T, Dh]
         v: torch.Tensor,  # [B, H, T, Dh]
         *,
-        attn_mask: Optional[Any] = None,  # backend-specific (indices/COO/etc.)
+        attn_mask: Any | None = None,  # backend-specific (indices/COO/etc.)
     ) -> torch.Tensor:  # [B, H, T, Dh]
         ...
+
 
 def build_attention_backend(cfg: AttentionConfig) -> AttentionBackend:
     """
@@ -28,11 +33,14 @@ def build_attention_backend(cfg: AttentionConfig) -> AttentionBackend:
     backend = cfg.backend.lower()
     if backend == "dense":
         from .dense import DenseAttention
+
         return DenseAttention(cfg)
     if backend == "window":
         from .window import WindowAttention
+
         return WindowAttention(cfg)
     if backend == "sparse":
         from .sparse import SparseAttention
+
         return SparseAttention(cfg)
     raise ValueError(f"Unknown attention backend: {cfg.backend}")

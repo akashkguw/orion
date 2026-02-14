@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
 
@@ -16,11 +17,10 @@ class OrionDecoder(nn.Module):
     """
     Placeholder for the real Orion decoder-only model (custom blocks + pluggable attention).
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__()
-        raise NotImplementedError(
-            "OrionDecoder not implemented yet. Set model.name: tiny for now."
-        )
+        raise NotImplementedError("OrionDecoder not implemented yet. Set model.name: tiny for now.")
 
 
 def build_model(

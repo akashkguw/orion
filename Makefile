@@ -1,16 +1,26 @@
-.PHONY: setup dev test lint train eval
+.PHONY: setup dev test lint format train eval smoke
 
 setup:
 	pip install -r requirements.txt
 
 dev:
 	pip install -r requirements.txt -r requirements-dev.txt
+	pip install -e .
+
+lint:
+	ruff check .
+
+format:
+	ruff format .
+
+format-check:
+	ruff format --check .
 
 test:
 	pytest -q
 
-lint:
-	ruff check .
+smoke:
+	SMOKE_TEST=true SMOKE_STEPS=20 python -m orion.train --config configs/golden.yaml
 
 train:
 	python -m orion.train --config configs/golden.yaml
