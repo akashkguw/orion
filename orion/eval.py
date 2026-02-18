@@ -32,7 +32,6 @@ def main():
     model_name = str(cfg.get("model", "name", default="tiny"))
     attention_cfg = cfg.attention_config()
 
-
     model = build_model(
         name=model_name,
         vocab_size=vocab_size,
