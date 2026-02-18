@@ -4,6 +4,7 @@ import torch
 
 from .config import load_config
 from .model import loss_fn
+from .models_factory import build_model
 
 
 @torch.no_grad()
@@ -29,7 +30,8 @@ def main():
     mlp_mult = int(cfg.get("model", "mlp_mult", default=4))
 
     model_name = str(cfg.get("model", "name", default="tiny"))
-    from .models_factory import build_model
+    attention_cfg = cfg.attention_config()
+
 
     model = build_model(
         name=model_name,
@@ -39,6 +41,7 @@ def main():
         n_heads=n_heads,
         mlp_mult=mlp_mult,
         device=device,
+        attention_cfg=attention_cfg,
     )
 
     ckpt = torch.load(args.checkpoint, map_location=device)

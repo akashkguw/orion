@@ -78,6 +78,8 @@ def main():
 
     # -------- Model / Optim --------
     model_name = str(cfg.get("model", "name", default="tiny"))
+    attention_cfg = cfg.attention_config()
+
     from .models_factory import build_model
 
     model = build_model(
@@ -88,6 +90,7 @@ def main():
         n_heads=n_heads,
         mlp_mult=mlp_mult,
         device=device,
+        attention_cfg=attention_cfg,
     )
 
     opt = AdamW(model.parameters(), lr=float(cfg.get("optim", "lr", default=3e-4)))
