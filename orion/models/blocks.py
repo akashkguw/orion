@@ -9,6 +9,8 @@ from orion.attention.base import AttentionBackend, AttentionConfig, build_attent
 class DecoderBlock(nn.Module):
     """Single transformer layer: Pre-LN attention + Pre-LN MLP, both with residuals.
 
+    https://d2l.ai/chapter_attention-mechanisms-and-transformers/transformer.html
+
     Q/K/V projections live here so all attention backends share the same
     learned weights. The backend itself is stateless (just math).
     """
@@ -28,11 +30,13 @@ class DecoderBlock(nn.Module):
 
         # Separate Q/K/V rather than fused Linear(d, 3d) — easier to read.
         # Production models fuse for GPU throughput.
+        # https://d2l.ai/chapter_attention-mechanisms-and-transformers/multihead-attention.html
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
         self.o_proj = nn.Linear(d_model, d_model)
 
+        # https://d2l.ai/chapter_attention-mechanisms-and-transformers/transformer.html#positionwise-feed-forward-networks
         self.mlp = nn.Sequential(
             nn.Linear(d_model, d_model * mlp_mult),
             nn.GELU(),
@@ -58,6 +62,7 @@ class DecoderBlock(nn.Module):
         return self.o_proj(attn_out)
 
     def forward(self, x: torch.Tensor, *, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        # https://d2l.ai/chapter_convolutional-modern/resnet.html (residual connections)
         x = x + self._attend(self.ln1(x), attn_mask)
         x = x + self.mlp(self.ln2(x))
         return x
