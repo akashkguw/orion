@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+from .attention.base import AttentionConfig
+
 
 @dataclass(frozen=True)
 class OrionConfig:
@@ -22,6 +24,17 @@ class OrionConfig:
                 return default
             d = d[k]
         return d
+
+    def attention_config(self) -> AttentionConfig:
+        """Parse the 'attention' section into AttentionConfig. Defaults to dense."""
+        backend = str(self.get("attention", "backend", default="dense"))
+        window = self.get("attention", "window_size")
+        expander = self.get("attention", "expander_degree")
+        return AttentionConfig(
+            backend=backend,
+            window_size=int(window) if window is not None else None,
+            expander_degree=int(expander) if expander is not None else None,
+        )
 
 
 def load_config(path: str) -> OrionConfig:

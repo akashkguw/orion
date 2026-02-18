@@ -11,6 +11,7 @@ from torch.optim import AdamW
 from .config import load_config
 from .logging_utils import JsonlLogger
 from .model import loss_fn
+from .models_factory import build_model
 
 
 def set_seed(seed: int) -> None:
@@ -78,7 +79,7 @@ def main():
 
     # -------- Model / Optim --------
     model_name = str(cfg.get("model", "name", default="tiny"))
-    from .models_factory import build_model
+    attention_cfg = cfg.attention_config()
 
     model = build_model(
         name=model_name,
@@ -88,6 +89,7 @@ def main():
         n_heads=n_heads,
         mlp_mult=mlp_mult,
         device=device,
+        attention_cfg=attention_cfg,
     )
 
     opt = AdamW(model.parameters(), lr=float(cfg.get("optim", "lr", default=3e-4)))

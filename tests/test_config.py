@@ -70,3 +70,26 @@ def test_config_raw_access():
     cfg = OrionConfig({"key": "value", "nested": {"inner": 42}})
     assert cfg.raw["key"] == "value"
     assert cfg.raw["nested"]["inner"] == 42
+
+
+def test_attention_config_defaults():
+    """Missing attention section defaults to dense with no window/expander."""
+    cfg = OrionConfig({"run": {"out_dir": "/tmp"}})
+    acfg = cfg.attention_config()
+    assert acfg.backend == "dense"
+    assert acfg.window_size is None
+    assert acfg.expander_degree is None
+
+
+def test_attention_config_from_yaml():
+    """Parses attention section with correct types."""
+    cfg = OrionConfig(
+        {
+            "run": {"out_dir": "/tmp"},
+            "attention": {"backend": "sparse", "window_size": 64, "expander_degree": 4},
+        }
+    )
+    acfg = cfg.attention_config()
+    assert acfg.backend == "sparse"
+    assert acfg.window_size == 64
+    assert acfg.expander_degree == 4
