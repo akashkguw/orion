@@ -26,7 +26,7 @@ class OrionConfig:
         return d
 
     def attention_config(self) -> AttentionConfig:
-        """Build AttentionConfig from the 'attention' section, defaulting to dense."""
+        """Parse the 'attention' section into AttentionConfig. Defaults to dense."""
         backend = str(self.get("attention", "backend", default="dense"))
         window = self.get("attention", "window_size")
         expander = self.get("attention", "expander_degree")

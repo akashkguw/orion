@@ -16,13 +16,12 @@ class ModelSpec:
 
 
 class OrionDecoder(nn.Module):
-    """GPT-style decoder with pluggable attention backends.
+    """GPT-style decoder, attention backend set via config.
 
     https://d2l.ai/chapter_attention-mechanisms-and-transformers/transformer.html
-    Pluggable backend is our addition for sparse attention experiments.
 
-    Same forward interface as TinyDecoderOnly (idx → logits) so they're
-    interchangeable from the training loop.
+    Same interface as TinyDecoderOnly (idx → logits) so the training loop
+    works with either.
     """
 
     def __init__(
@@ -38,7 +37,7 @@ class OrionDecoder(nn.Module):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, d_model)
         # https://d2l.ai/chapter_attention-mechanisms-and-transformers/self-attention-and-positional-encoding.html#positional-encoding
-        self.pos_emb = nn.Embedding(max_seq_len, d_model)  # learned, not sinusoidal
+        self.pos_emb = nn.Embedding(max_seq_len, d_model)  # learned positional embeddings
         self.blocks = nn.ModuleList(
             [DecoderBlock(d_model, n_heads, attention_cfg, mlp_mult) for _ in range(n_layers)]
         )

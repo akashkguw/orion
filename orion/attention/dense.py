@@ -7,9 +7,8 @@ from .base import AttentionConfig
 
 
 class DenseAttention:
-    """Full causal attention — every token attends to all previous tokens.
+    """Full causal attention. Implements AttentionBackend.
 
-    Implements AttentionBackend protocol. Not an nn.Module (no learnable params).
     https://d2l.ai/chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html
     """
 

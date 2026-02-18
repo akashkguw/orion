@@ -7,12 +7,11 @@ from orion.attention.base import AttentionBackend, AttentionConfig, build_attent
 
 
 class DecoderBlock(nn.Module):
-    """Single transformer layer: Pre-LN attention + Pre-LN MLP, both with residuals.
+    """Pre-LN transformer layer (attention + MLP, both with residuals).
 
     https://d2l.ai/chapter_attention-mechanisms-and-transformers/transformer.html
 
-    Q/K/V projections live here so all attention backends share the same
-    learned weights. The backend itself is stateless (just math).
+    Q/K/V projections live here so backends share weights.
     """
 
     def __init__(
@@ -28,8 +27,7 @@ class DecoderBlock(nn.Module):
         self.ln2 = nn.LayerNorm(d_model)
         self.attn: AttentionBackend = build_attention_backend(attention_cfg)
 
-        # Separate Q/K/V rather than fused Linear(d, 3d) — easier to read.
-        # Production models fuse for GPU throughput.
+        # Separate Q/K/V projections for readability.
         # https://d2l.ai/chapter_attention-mechanisms-and-transformers/multihead-attention.html
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
@@ -44,7 +42,7 @@ class DecoderBlock(nn.Module):
         )
 
     def _attend(self, x: torch.Tensor, attn_mask: torch.Tensor | None) -> torch.Tensor:
-        """Project → multi-head attention → concat → output projection."""
+        """Q/K/V project, attend, concat heads, output project."""
         B, T, _D = x.shape
 
         # [B, T, D] → [B, H, T, Dh] — split d_model into heads
@@ -54,9 +52,8 @@ class DecoderBlock(nn.Module):
 
         attn_out = self.attn.forward(q, k, v, attn_mask=attn_mask)
 
-        # [B, H, T, Dh] → [B, T, D] — concatenate heads back
-        # .contiguous() needed: transpose returns a view with non-contiguous
-        # strides, but .view() requires contiguous memory
+        # [B, H, T, Dh] → [B, T, D]
+        # .contiguous() because transpose makes strides non-contiguous and view needs contiguous
         attn_out = attn_out.transpose(1, 2).contiguous().view(B, T, -1)
 
         return self.o_proj(attn_out)

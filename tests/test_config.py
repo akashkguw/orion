@@ -82,7 +82,7 @@ def test_attention_config_defaults():
 
 
 def test_attention_config_from_yaml():
-    """Attention section is parsed into AttentionConfig with correct types."""
+    """Parses attention section with correct types."""
     cfg = OrionConfig(
         {
             "run": {"out_dir": "/tmp"},
