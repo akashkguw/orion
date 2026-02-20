@@ -20,7 +20,7 @@ class TinyDecoderOnly(nn.Module):
             activation="gelu",
             norm_first=True,
         )
-        self.blocks = nn.TransformerEncoder(layer, num_layers=n_layers)
+        self.blocks = nn.TransformerEncoder(layer, num_layers=n_layers, enable_nested_tensor=False)
         self.ln = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, vocab_size, bias=False)
 

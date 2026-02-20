@@ -68,6 +68,24 @@ pip install -e .
 python -m orion.train --config configs/golden.yaml
 ```
 
+Override the checkpoint interval on the command line:
+
+```bash
+python -m orion.train --config configs/golden.yaml --save-every 50
+```
+
+Resume from the latest checkpoint in the run directory:
+
+```bash
+python -m orion.train --config configs/golden.yaml --resume
+```
+
+Resume from a specific checkpoint path:
+
+```bash
+python -m orion.train --config configs/golden.yaml --resume runs/exp_shakespeare_dense/checkpoint.pt
+```
+
 Outputs:
 - `runs/latest/metrics.jsonl` - Training metrics
 - `runs/latest/checkpoint.pt` - Model checkpoint
@@ -179,9 +197,12 @@ Checkpoints are PyTorch `.pt` files containing:
 {
     "model": model.state_dict(),      # Model weights
     "opt": optimizer.state_dict(),    # Optimizer state
+    "scheduler": scheduler.state_dict() if scheduler else None,
     "step": 100,                      # Training step
+    "epoch": 100,                      # Training epoch
     "seed": 123,                      # Random seed
     "config": cfg.raw,                # Full config
+    "rng_state": {...},                # RNG state for deterministic resume
 }
 ```
 
@@ -215,7 +236,7 @@ pytest --cov=orion tests/
 
 ### Test Coverage
 
-**29 total tests** across 6 test files:
+**30 total tests** across 6 test files:
 
 | Category | Tests | Coverage |
 |----------|-------|----------|
@@ -223,7 +244,7 @@ pytest --cov=orion tests/
 | Model | 3 | Forward pass, loss computation, device handling |
 | Data | 3 | Tokenizer creation, encoding, roundtrip |
 | Causal Mask | 6 | Mask pattern, future attention, variable seq_len |
-| Checkpoint | 3 | Save/load, metadata, device transfer |
+| Checkpoint | 4 | Save/load, metadata, device transfer |
 | Logging | 10 | JSONL format, field validation, structure |
 
 ---
@@ -270,4 +291,3 @@ All checks must pass before merge.
 ## License
 
 Apache-2.0
-
