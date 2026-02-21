@@ -267,6 +267,18 @@ All checks must pass before merge.
 
 ---
 
+## Editing the Colab Notebook
+
+1. Create a branch from `main`: `git checkout -b my-branch main`
+2. Push the branch: `git push -u origin my-branch`
+3. Open the notebook in Colab (Search how to do it) and point it to this repo and that branch, for example: `https://colab.research.google.com/github/akashkguw/orion/blob/my-branch/orion.ipynb`
+4. Make your changes (add cells, update commands, etc.)
+5. In Colab, go to **File → Save a copy in GitHub**
+6. Select the `my-branch` branch and save
+7. Open a PR from `my-branch` into `main`
+
+---
+
 ## License
 
 Apache-2.0
