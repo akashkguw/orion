@@ -2,24 +2,13 @@ from __future__ import annotations
 
 import torch
 
-from .config import load_config
+from .config import OrionConfig, load_config
 from .model import loss_fn
 from .models_factory import build_model
 
 
 @torch.no_grad()
-def main():
-    import argparse
-
-    p = argparse.ArgumentParser()
-    p.add_argument("--config", required=True)
-    p.add_argument("--checkpoint", required=True)
-    p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    args = p.parse_args()
-
-    cfg = load_config(args.config)
-    device = torch.device(args.device)
-
+def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict[str, float]:
     vocab_size = int(cfg.get("data", "vocab_size", default=256))
     seq_len = int(cfg.get("data", "seq_len", default=128))
     batch_size = int(cfg.get("data", "batch_size", default=8))
@@ -43,7 +32,7 @@ def main():
         attention_cfg=attention_cfg,
     )
 
-    ckpt = torch.load(args.checkpoint, map_location=device)
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model"], strict=True)
     model.eval()
 
@@ -52,7 +41,22 @@ def main():
     logits = model(x)
     loss = loss_fn(logits, y)
     ppl = float(torch.exp(loss).clamp(max=1e6).item())
-    print({"loss": float(loss.item()), "ppl": ppl})
+    return {"loss": float(loss.item()), "ppl": ppl}
+
+
+@torch.no_grad()
+def main():
+    import argparse
+
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", required=True)
+    p.add_argument("--checkpoint", required=True)
+    p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    args = p.parse_args()
+
+    cfg = load_config(args.config)
+    device = torch.device(args.device)
+    print(evaluate(cfg, checkpoint=args.checkpoint, device=device))
 
 
 if __name__ == "__main__":
