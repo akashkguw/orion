@@ -142,10 +142,12 @@ def train(
         loss.backward()
 
         # Compute gradient norm before clipping
-        grad_norm_pre_clip, grad_norm = metrics_tracker.compute_grad_norm(model)
+        grad_norm_pre_clip = metrics_tracker.compute_grad_norm_pre_clip(model)
 
-        # Clip gradients (standard practice)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # Clip gradients and get post-clip norm
+        grad_norm_post_clip = float(
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        )
 
         opt.step()
         if scheduler is not None:
@@ -158,9 +160,9 @@ def train(
         step_metrics = metrics_tracker.record_step_metrics(
             step=step,
             loss=float(loss.item()),
-            grad_norm=grad_norm,
-            throughput=throughput,
             grad_norm_pre_clip=grad_norm_pre_clip,
+            grad_norm_post_clip=grad_norm_post_clip,
+            throughput=throughput,
         )
         logger.log({"type": "step", **metrics_to_dict(step_metrics)})
 
@@ -168,7 +170,8 @@ def train(
         if step % log_every == 0:
             print(
                 f"Step {step}: loss={step_metrics.loss:.4f}, ppl={step_metrics.ppl:.2f}, "
-                f"throughput={throughput:.1f} tok/s, grad_norm={grad_norm:.4f}"
+                f"throughput={throughput:.1f} tok/s, grad_norm_pre={grad_norm_pre_clip:.4f}, "
+                f"grad_norm_post={grad_norm_post_clip:.4f}"
             )
 
         # Record window metrics every 50 steps
@@ -178,9 +181,9 @@ def train(
                 vram_peak_mib = int(torch.cuda.max_memory_allocated() / (1024 * 1024))
                 torch.cuda.reset_peak_memory_stats()
 
-            # Compute activation norm (requires forward pass)
-            with torch.no_grad():
-                activation_norm = metrics_tracker.compute_activation_norm(model)
+            # Compute activation norm from last forward pass output
+            # For now, use a dummy value (would need to capture from model)
+            activation_norm = 0.0
 
             # Compute attention entropy if using sparse attention
             attention_entropy = 0.0

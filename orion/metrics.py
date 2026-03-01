@@ -14,10 +14,12 @@ class StepMetrics:
 
     step: int
     loss: float
+    nll: float  # Negative log likelihood (same as loss if no label smoothing)
     ppl: float
     throughput_tokens_per_sec: float
-    grad_norm: float
-    grad_norm_pre_clip: float | None = None
+    grad_norm_pre_clip: float
+    grad_norm_post_clip: float
+    grad_clipped: bool
     diverged: bool = False
 
 
@@ -40,6 +42,7 @@ class RunMetrics:
     step: int
     attention_degree: int
     compute_proxy_per_token: int
+    compute_proxy_per_seq: int
     compute_proxy_per_step: int
 
 
@@ -80,24 +83,20 @@ class MetricsTracker:
         tokens_this_step = batch_size * seq_len
         return tokens_this_step / step_time_sec
 
-    def compute_grad_norm(self, model: torch.nn.Module) -> tuple[float, float]:
-        """Compute global gradient norm before and after clipping.
+    def compute_grad_norm_pre_clip(self, model: torch.nn.Module) -> float:
+        """Compute global gradient norm before clipping.
 
         Args:
             model: Model to compute grad norm for
 
         Returns:
-            Tuple of (grad_norm_pre_clip, grad_norm_post_clip)
+            Gradient norm before clipping
         """
-        total_norm_pre = 0.0
+        total_norm = 0.0
         for p in model.parameters():
             if p.grad is not None:
-                total_norm_pre += p.grad.data.norm(2).item() ** 2
-        grad_norm_pre_clip = math.sqrt(total_norm_pre)
-
-        # Post-clip is typically the same unless you clip, so return pre for now
-        # In practice, you'd track this after torch.nn.utils.clip_grad_norm_
-        return grad_norm_pre_clip, grad_norm_pre_clip
+                total_norm += p.grad.data.norm(2).item() ** 2
+        return math.sqrt(total_norm)
 
     def check_divergence(self, loss: float, grad_norm: float) -> bool:
         """Check if training has diverged.
@@ -113,47 +112,20 @@ class MetricsTracker:
             math.isnan(loss) or math.isinf(loss) or math.isnan(grad_norm) or math.isinf(grad_norm)
         )
 
-    def compute_activation_norm(self, model: torch.nn.Module) -> float:
+    def compute_activation_norm(self, residual_output: torch.Tensor) -> float:
         """Compute RMS of residual stream activations.
 
-        Uses the last layer's residual stream as representative.
-
         Args:
-            model: Model to compute activation norm for
+            residual_output: Residual stream output tensor [B, T, D]
 
         Returns:
             RMS norm of residual activations
         """
-        activation_norms = []
-
-        # Hook to capture residual activations
-        def hook_fn(module, input, output):
-            if isinstance(output, torch.Tensor):
-                # Compute RMS: sqrt(mean(x^2))
-                rms = torch.sqrt(torch.mean(output**2)).item()
-                activation_norms.append(rms)
-
-        # Register hooks on residual connections (if available)
-        hooks = []
-        for module in model.modules():
-            if hasattr(module, "residual"):
-                h = module.register_forward_hook(hook_fn)
-                hooks.append(h)
-
-        # If no residual hooks found, use output of last layer
-        if not hooks:
-            for module in model.modules():
-                if isinstance(module, torch.nn.Linear):
-                    h = module.register_forward_hook(hook_fn)
-                    hooks.append(h)
-
-        # Clean up hooks
-        for h in hooks:
-            h.remove()
-
-        if activation_norms:
-            return sum(activation_norms) / len(activation_norms)
-        return 0.0
+        if residual_output is None or residual_output.numel() == 0:
+            return 0.0
+        # Compute RMS: sqrt(mean(x^2))
+        rms = torch.sqrt(torch.mean(residual_output**2)).item()
+        return rms
 
     def compute_attention_entropy(
         self, attn_weights: torch.Tensor, degree: int
@@ -182,24 +154,26 @@ class MetricsTracker:
         self,
         step: int,
         loss: float,
-        grad_norm: float,
+        grad_norm_pre_clip: float,
+        grad_norm_post_clip: float,
         throughput: float,
-        grad_norm_pre_clip: float | None = None,
     ) -> StepMetrics:
         """Record metrics for a single step.
 
         Args:
             step: Step number
-            loss: Loss value
-            grad_norm: Gradient norm (post-clip)
+            loss: Loss value (NLL if no label smoothing)
+            grad_norm_pre_clip: Gradient norm before clipping
+            grad_norm_post_clip: Gradient norm after clipping
             throughput: Throughput in tokens/sec
-            grad_norm_pre_clip: Gradient norm before clipping (optional)
 
         Returns:
             StepMetrics object
         """
+        nll = loss
         ppl = math.exp(min(loss, 100.0))  # Clamp to avoid overflow
-        diverged = self.check_divergence(loss, grad_norm)
+        grad_clipped = grad_norm_pre_clip > 1.0
+        diverged = self.check_divergence(loss, grad_norm_post_clip)
 
         if diverged:
             self.diverged_steps.append(1)
@@ -209,10 +183,12 @@ class MetricsTracker:
         return StepMetrics(
             step=step,
             loss=loss,
+            nll=nll,
             ppl=ppl,
             throughput_tokens_per_sec=throughput,
-            grad_norm=grad_norm,
             grad_norm_pre_clip=grad_norm_pre_clip,
+            grad_norm_post_clip=grad_norm_post_clip,
+            grad_clipped=grad_clipped,
             diverged=diverged,
         )
 
@@ -279,13 +255,15 @@ class MetricsTracker:
             RunMetrics object
         """
         degree = window_size + expander_degree
-        compute_proxy_per_token = seq_len * degree
+        compute_proxy_per_token = degree
+        compute_proxy_per_seq = seq_len * degree
         compute_proxy_per_step = batch_size * n_heads * seq_len * degree
 
         return RunMetrics(
             step=step,
             attention_degree=degree,
             compute_proxy_per_token=compute_proxy_per_token,
+            compute_proxy_per_seq=compute_proxy_per_seq,
             compute_proxy_per_step=compute_proxy_per_step,
         )
 
