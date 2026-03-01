@@ -175,9 +175,19 @@ class SparseAttention:
         # Apply padding mask if provided
         if attn_mask is not None:
             if attn_mask.dim() == 2:  # [B, T]
-                attn_mask = attn_mask[:, None, None, :]  # [B, 1, 1, T]
-            # Broadcast and apply
-            scores = scores.masked_fill(~attn_mask[:, :, :, None], float("-inf"))
+                attn_mask = attn_mask.unsqueeze(1).expand(B, H, T)  # [B, H, T]
+            else:
+                attn_mask = attn_mask  # [B, H, T, T]
+
+            attn_mask_flat = attn_mask.reshape(B * H, T)  # [B*H, T]
+
+            # Gather mask for sparse positions
+            mask_sparse = torch.gather(
+                attn_mask_flat[:, :, None].expand(B * H, T, degree), dim=1, index=indices_clamped
+            )  # [B*H, T, degree]
+
+            mask_sparse = mask_sparse.reshape(B, H, T, degree)
+            scores = scores.masked_fill(~mask_sparse, float("-inf"))
 
         # Softmax over neighbors
         attn_weights = F.softmax(scores, dim=-1)
