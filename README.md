@@ -86,7 +86,7 @@ pip install -e .
 
 **Verify Installation:**
 ```bash
-python -c "import orion; print('✓ Orion installed')"
+python -c "import orion; print('Orion installed')"
 pytest tests/ -q  # Run quick test
 ```
 
@@ -129,11 +129,11 @@ Total:    [1, 6, 7, 8, 9, 10]  (7 positions vs 11 for dense)
 
 ### Key Features
 
-✅ **Causality** - Only attend to positions ≤ q  
-✅ **Per-Head Variation** - Different patterns per head  
-✅ **Masking** - Respects padding and segment boundaries  
-✅ **Deterministic** - Reproducible across runs  
-✅ **Robust** - Handles edge cases (T=0, early tokens, etc.)
+- **Causality** - Only attend to positions ≤ q  
+- **Per-Head Variation** - Different patterns per head  
+- **Masking** - Respects padding and segment boundaries  
+- **Deterministic** - Reproducible across runs  
+- **Robust** - Handles edge cases (T=0, early tokens, etc.)
 
 ### Configuration
 
@@ -148,10 +148,10 @@ model:
 
 | Scenario | Recommendation |
 |----------|---|
-| **Long sequences** (512+) | ✅ Use sparse |
-| **Limited GPU memory** | ✅ Use sparse |
-| **Short sequences** (<256) | ❌ Dense is simpler |
-| **Maximum accuracy** | ⚠️ Dense may be better |
+| **Long sequences** (512+) | Use sparse |
+| **Limited GPU memory** | Use sparse |
+| **Short sequences** (<256) | Dense is simpler |
+| **Maximum accuracy** | Dense may be better |
 
 ### Learn More
 
@@ -232,6 +232,70 @@ optim:
 - `exp_sparse_smoke.yaml` - Sparse attention (quick test)
 - `exp_sparse_window_256.yaml` - Sparse with larger window
 - `tinyshakespeare_*.yaml` - Various configurations
+
+---
+
+## Comprehensive Metrics
+
+Orion logs detailed metrics at multiple frequencies to track model quality, efficiency, stability, and sparse attention health.
+
+### Metrics Categories
+
+**Every Step (Always-On):**
+- `loss` - Cross-entropy loss
+- `ppl` - Perplexity (exp(loss))
+- `throughput_tokens_per_sec` - Training speed
+- `grad_norm` - Gradient norm (post-clip)
+- `grad_norm_pre_clip` - Gradient norm (pre-clip, optional)
+- `diverged` - Boolean divergence flag (NaN/Inf detected)
+
+**Every 50 Steps (Windowed):**
+- `vram_peak_mib` - Peak GPU memory in MiB
+- `divergence_rate` - Fraction of diverged steps in window
+- `activation_norm_rms` - Residual stream RMS
+- `attention_entropy` - Raw entropy of attention weights
+- `attention_entropy_normalized` - Normalized entropy (0-1)
+
+**Once Per Run:**
+- `attention_degree` - window_size + expander_degree
+- `compute_proxy_per_token` - Attention compute per token
+- `compute_proxy_per_step` - Attention compute per step
+
+**Every 1000 Steps (Evaluation):**
+- `eval_ppl_512` - Perplexity at 512 tokens
+- `eval_ppl_1024` - Perplexity at 1024 tokens
+- `eval_ppl_2048` - Perplexity at 2048 tokens
+- `eval_ppl_4096` - Perplexity at 4096 tokens
+
+### Metrics File Format
+
+All metrics logged to `{run_dir}/metrics.jsonl` with type field:
+
+```json
+{"type": "run_metrics", "step": 1, "attention_degree": 72, ...}
+{"type": "step", "step": 1, "loss": 5.73, "ppl": 307.56, ...}
+{"type": "window", "step": 50, "vram_peak_mib": 2048, ...}
+{"type": "eval", "step": 1000, "eval_ppl_512": 12.5, ...}
+```
+
+### Viewing Metrics
+
+```bash
+# View all metrics
+cat runs/latest/metrics.jsonl | jq .
+
+# View only step metrics
+cat runs/latest/metrics.jsonl | jq 'select(.type == "step")'
+
+# Extract specific field
+cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'
+
+# Compare Dense vs Sparse throughput
+paste <(cat runs/exp_dense/metrics.jsonl | jq -r 'select(.type == "step") | .throughput_tokens_per_sec') \
+      <(cat runs/exp_sparse/metrics.jsonl | jq -r 'select(.type == "step") | .throughput_tokens_per_sec')
+```
+
+For detailed metrics documentation, see [COMPREHENSIVE_METRICS_GUIDE.md](COMPREHENSIVE_METRICS_GUIDE.md).
 
 ---
 

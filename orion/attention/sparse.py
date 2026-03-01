@@ -309,8 +309,7 @@ class SparseAttention:
         elif mask_h != H:
             # Explicit check: mask head dim must be 1 or H
             raise ValueError(
-                f"attn_mask head dimension must be 1 or {H}, got {mask_h}. "
-                f"Shape: {attn_mask.shape}"
+                f"attn_mask head dimension must be 1 or {H}, got {mask_h}. Shape: {attn_mask.shape}"
             )
 
         # Gather mask for sparse neighbors
