@@ -3,11 +3,11 @@
 A research framework for long-context, decoder-only Transformers with **structured sparse attention** (sliding window + expander edges) and stability controls (QK-norm, orthogonal init, spectral normalization).
 
 **Key Features:**
-- 🚀 **Sparse Attention** - O(T·(W+d)) complexity vs O(T²) for dense (7x faster on 512 tokens)
-- 📊 **Reproducible** - Deterministic training with seed control and checkpoint management
-- 🔧 **Configurable** - YAML-based configs for easy experimentation
-- ✅ **Well-tested** - 82+ tests covering all components
-- 📈 **Benchmarked** - Configs for 256–4K context lengths
+- Sparse Attention - O(T*(W+d)) complexity vs O(T^2) for dense (7x faster on 512 tokens)
+- Reproducible - Deterministic training with seed control and checkpoint management
+- Configurable - YAML-based configs for easy experimentation
+- Well-tested - 82+ tests covering all components
+- Benchmarked - Configs for 256-4K context lengths
 
 **Table of Contents**
 - [Quick Start](#quick-start)
@@ -25,9 +25,9 @@ A research framework for long-context, decoder-only Transformers with **structur
 
 ## Quick Start
 
-### 🚀 Google Colab (Recommended - No Setup Required)
+### Google Colab (Recommended - No Setup Required)
 
-Click to open in Colab: [Orion-Master.ipynb](https://colab.research.google.com/drive/1loF_wQVC2-tFcUZaBAK22Pz4mQKy9gvG)
+Click to open in Colab: [Orion-Master.ipynb](https://colab.research.google.com/github/akashkguw/orion/blob/main/orion.ipynb)
 
 ```bash
 # In Colab cell:
@@ -43,7 +43,7 @@ Click to open in Colab: [Orion-Master.ipynb](https://colab.research.google.com/d
 - Perfect for quick experiments
 - Save results to Google Drive
 
-### 💻 Local Setup (5 minutes)
+### Local Setup (5 minutes)
 
 ```bash
 # Clone and setup
