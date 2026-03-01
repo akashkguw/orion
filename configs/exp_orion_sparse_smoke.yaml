@@ -1,4 +1,4 @@
-# OrionSparseAttention smoke test (Ramanujan-based, true sparse)
+# Sparse attention smoke test (window + expander edges)
 run:
   out_dir: runs/exp_orion_sparse_smoke
   seed: 123
@@ -21,6 +21,7 @@ model:
 
 attention:
   backend: sparse
+  window_size: 16
   expander_degree: 8
 
 optim:

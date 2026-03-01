@@ -9,8 +9,8 @@ import torch
 @dataclass(frozen=True)
 class AttentionConfig:
     backend: str  # "dense" | "window" | "sparse"
-    window_size: int | None = None  # W
-    expander_degree: int | None = None  # d
+    window_size: int | None = None  # W (local window size)
+    expander_degree: int | None = None  # d (number of long-range expander neighbors)
     # add fields as needed (dropout, qk_norm toggle, etc.)
 
 
@@ -40,7 +40,7 @@ def build_attention_backend(cfg: AttentionConfig) -> AttentionBackend:
 
         return WindowAttention(cfg)
     if backend == "sparse":
-        from .sparse import OrionSparseAttention
+        from .sparse import SparseAttention
 
-        return OrionSparseAttention(cfg)
+        return SparseAttention(cfg)
     raise ValueError(f"Unknown attention backend: {cfg.backend}")

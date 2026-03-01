@@ -1,4 +1,4 @@
-# Sparse attention with sliding window + expander links
+# Sparse attention with larger window and expander
 # Window size: 256, Expander degree: 16
 run:
   out_dir: runs/exp_sparse_window_256
