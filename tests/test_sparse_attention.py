@@ -167,6 +167,26 @@ class TestSparseAttention:
         assert output.shape == (B, H, T, Dh)
         assert not torch.isnan(output).any()
 
+    def test_forward_with_full_mask(self):
+        """Test forward pass with full attention mask."""
+        B, H, T, Dh = 2, 4, 32, 64
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        # Create full mask (causal + some padding)
+        attn_mask = torch.tril(torch.ones(T, T, dtype=torch.bool))
+        attn_mask = attn_mask[None, None, :, :].expand(B, H, T, T).clone()
+        attn_mask[:, :, :, -8:] = False  # Mask last 8 positions
+
+        output = attn.forward(q, k, v, attn_mask=attn_mask)
+
+        assert output.shape == (B, H, T, Dh)
+        assert not torch.isnan(output).any()
+
     def test_indices_caching(self):
         """Test that indices are cached correctly."""
         B, H, T, Dh = 2, 4, 32, 64

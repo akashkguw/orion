@@ -88,7 +88,7 @@ class SparseAttention:
 
     def __init__(self, cfg: AttentionConfig):
         self.cfg = cfg
-        self.window_size = cfg.window_size or 64
+        self.window_size = max(1, cfg.window_size or 64)  # Ensure window_size >= 1
         self.expander_degree = cfg.expander_degree or 8
         self.indices_cache: dict = {}
 
@@ -122,7 +122,8 @@ class SparseAttention:
 
         Args:
             q, k, v: [B, H, T, Dh] query, key, value tensors
-            attn_mask: Optional [B, T] or [B, H, T, T] mask for padding/segments
+            attn_mask: Optional [B, T] (key padding) or [B, H, T, T] (full mask)
+                       True=keep, False=mask out
 
         Returns:
             [B, H, T, Dh] attention output
@@ -172,22 +173,21 @@ class SparseAttention:
         # Apply validity mask to scores
         scores = scores.masked_fill(~validity_mask, float("-inf"))
 
-        # Apply padding mask if provided
+        # Apply padding/segment mask if provided
         if attn_mask is not None:
-            if attn_mask.dim() == 2:  # [B, T]
-                attn_mask = attn_mask.unsqueeze(1).expand(B, H, T)  # [B, H, T]
-            else:
-                attn_mask = attn_mask  # [B, H, T, T]
-
-            attn_mask_flat = attn_mask.reshape(B * H, T)  # [B*H, T]
-
-            # Gather mask for sparse positions
-            mask_sparse = torch.gather(
-                attn_mask_flat[:, :, None].expand(B * H, T, degree), dim=1, index=indices_clamped
-            )  # [B*H, T, degree]
-
-            mask_sparse = mask_sparse.reshape(B, H, T, degree)
-            scores = scores.masked_fill(~mask_sparse, float("-inf"))
+            if attn_mask.dim() == 2:  # Key padding mask: [B, T] (True=keep)
+                key_ok = attn_mask.to(torch.bool)  # [B, T]
+                key_ok = key_ok[:, None, :].expand(B, H, T).reshape(B * H, T)  # [B*H, T]
+                key_ok_neighbors = torch.gather(
+                    key_ok[:, :, None].expand(B * H, T, degree), dim=1, index=indices_clamped
+                )  # [B*H, T, degree]
+                key_ok_neighbors = key_ok_neighbors.reshape(B, H, T, degree)
+                scores = scores.masked_fill(~key_ok_neighbors, float("-inf"))
+            elif attn_mask.dim() == 4:  # Full mask: [B, H, T, T] (True=keep)
+                mask4 = attn_mask.to(torch.bool)
+                idx4 = indices_expanded.clamp(min=0)  # [B, H, T, degree]
+                key_ok_neighbors = torch.gather(mask4, 3, idx4)  # [B, H, T, degree]
+                scores = scores.masked_fill(~key_ok_neighbors, float("-inf"))
 
         # Softmax over neighbors
         attn_weights = F.softmax(scores, dim=-1)
