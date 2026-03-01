@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Union
-
 import torch
 import torch.nn.functional as F
 
@@ -13,7 +11,7 @@ def build_sparse_indices(
     window_size: int,
     expander_degree: int,
     head_idx: int,
-    device: Union[torch.device, str],
+    device: torch.device | str,
 ) -> torch.Tensor:
     """Build sparse attention indices combining local window + expander edges.
 
@@ -115,7 +113,7 @@ class SparseAttention:
         self.expander_degree = cfg.expander_degree or 8
         self.indices_cache: dict[tuple, torch.Tensor] = {}
 
-    def _get_indices(self, n: int, h: int, device: Union[torch.device, str]) -> torch.Tensor:
+    def _get_indices(self, n: int, h: int, device: torch.device | str) -> torch.Tensor:
         """Get or build sparse indices for a given sequence length and head.
 
         Args:
@@ -144,7 +142,7 @@ class SparseAttention:
         k: torch.Tensor,  # [B, H, T, Dh]
         v: torch.Tensor,  # [B, H, T, Dh]
         *,
-        attn_mask: Union[torch.Tensor, None] = None,
+        attn_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute sparse attention.
 
