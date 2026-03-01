@@ -40,7 +40,7 @@ def build_attention_backend(cfg: AttentionConfig) -> AttentionBackend:
 
         return WindowAttention(cfg)
     if backend == "sparse":
-        from .sparse import SparseAttention
+        from .sparse import OrionSparseAttention
 
-        return SparseAttention(cfg)
+        return OrionSparseAttention(cfg)
     raise ValueError(f"Unknown attention backend: {cfg.backend}")

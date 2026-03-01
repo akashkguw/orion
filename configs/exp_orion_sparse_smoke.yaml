@@ -1,0 +1,27 @@
+# OrionSparseAttention smoke test (Ramanujan-based, true sparse)
+run:
+  out_dir: runs/exp_orion_sparse_smoke
+  seed: 123
+  steps: 5
+  log_every: 1
+  save_every: 5
+
+data:
+  dataset: toy
+  seq_len: 128
+  batch_size: 8
+  vocab_size: 256
+
+model:
+  name: orion_decoder
+  d_model: 128
+  n_layers: 2
+  n_heads: 4
+  mlp_mult: 4
+
+attention:
+  backend: sparse
+  expander_degree: 8
+
+optim:
+  lr: 3e-4
