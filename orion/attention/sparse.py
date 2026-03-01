@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Union
+
 import torch
 import torch.nn.functional as F
 
@@ -11,7 +13,7 @@ def build_sparse_indices(
     window_size: int,
     expander_degree: int,
     head_idx: int,
-    device: torch.device | str,
+    device: Union[torch.device, str],
 ) -> torch.Tensor:
     """Build sparse attention indices combining local window + expander edges.
 
@@ -113,7 +115,7 @@ class SparseAttention:
         self.expander_degree = cfg.expander_degree or 8
         self.indices_cache: dict[tuple, torch.Tensor] = {}
 
-    def _get_indices(self, n: int, h: int, device: torch.device | str) -> torch.Tensor:
+    def _get_indices(self, n: int, h: int, device: Union[torch.device, str]) -> torch.Tensor:
         """Get or build sparse indices for a given sequence length and head.
 
         Args:
@@ -123,6 +125,11 @@ class SparseAttention:
 
         Returns:
             indices: [n, window_size + expander_degree] tensor
+
+        Note:
+            Cache key uses str(device) which is stable for q.device but may create
+            extra entries if device is passed as different string representations
+            (e.g., "cuda" vs "cuda:0"). In practice, q.device is consistent.
         """
         cache_key = (n, h, self.window_size, self.expander_degree, str(device))
         if cache_key not in self.indices_cache:
@@ -137,7 +144,7 @@ class SparseAttention:
         k: torch.Tensor,  # [B, H, T, Dh]
         v: torch.Tensor,  # [B, H, T, Dh]
         *,
-        attn_mask: torch.Tensor | None = None,
+        attn_mask: Union[torch.Tensor, None] = None,
     ) -> torch.Tensor:
         """Compute sparse attention.
 
@@ -189,6 +196,11 @@ class SparseAttention:
         scores = scores.masked_fill(~validity_mask, float("-inf"))
 
         # Apply padding/segment mask if provided
+        # Note: Masking strategy is safe because:
+        # 1. Invalid indices (-1) are clamped to 0 for gather (no out-of-bounds)
+        # 2. Validity mask applied first to -inf (invalid slots stay dead)
+        # 3. Padding/full masks applied per gathered neighbor (correct for sparse)
+        # 4. Softmax produces 0 weight for -inf slots (no NaN propagation)
         if attn_mask is not None:
             scores = self._apply_attention_mask(
                 scores, attn_mask, indices_clamped, indices_expanded, B, H, T, degree
@@ -285,12 +297,23 @@ class SparseAttention:
 
         Returns:
             scores: [B, H, T, degree] masked scores
+
+        Raises:
+            ValueError: If mask head dimension is neither 1 nor H
         """
         mask4 = attn_mask.to(torch.bool)
 
-        # Robustness shim: expand [B, 1, T, T] to [B, H, T, T] if needed
-        if mask4.shape[1] == 1 and H > 1:
+        # Validate and handle head dimension
+        mask_h = mask4.shape[1]
+        if mask_h == 1 and H > 1:
+            # Expand [B, 1, T, T] to [B, H, T, T]
             mask4 = mask4.expand(B, H, T, T)
+        elif mask_h != H:
+            # Explicit check: mask head dim must be 1 or H
+            raise ValueError(
+                f"attn_mask head dimension must be 1 or {H}, got {mask_h}. "
+                f"Shape: {attn_mask.shape}"
+            )
 
         # Gather mask for sparse neighbors
         idx4 = indices_expanded.clamp(min=0)  # [B, H, T, degree]
