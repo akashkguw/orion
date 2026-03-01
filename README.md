@@ -219,6 +219,116 @@ model.load_state_dict(ckpt["model"])
 
 ---
 
+## Sparse Attention
+
+### Overview
+
+Orion implements **sparse attention** combining a local sliding window with structured long-range expander edges. This reduces complexity from O(T²) to O(T·(W+d)) where W is window size and d is expander degree, enabling efficient long-context modeling.
+
+### Architecture
+
+Each query position attends to:
+
+1. **Local Window** - Dense context for short-range dependencies
+   - Positions: [q-W+1, ..., q-1, q]
+   - Always present (W ≥ 1)
+   - Captures immediate context
+
+2. **Expander Edges** - Structured long-range neighbors
+   - Positions: [q-offset₁, q-offset₂, ..., q-offsetₐ]
+   - Offsets computed via modular arithmetic: offset = (s² + head_offset) mod n
+   - Per-head variation: different offsets per head for diverse patterns
+   - Causality enforced: only attend to positions ≤ q
+
+### Example Pattern
+
+For query at position q=10 with window_size=4, expander_degree=3:
+
+```
+Window:   [7, 8, 9, 10]
+Expander: [10-1²=9, 10-2²=6, 10-3²=1]  (with per-head offset variation)
+Union:    [1, 6, 7, 8, 9, 10]  (deduplicated, sorted)
+```
+
+### Key Properties
+
+- **Causality**: All attended positions k ≤ q (enforced by construction)
+- **Masking**: Respects padding masks and segment boundaries (gathered per neighbor)
+- **Determinism**: Reproducible across runs (seed-based per-head offsets)
+- **Robustness**: Handles variable sequence lengths, early tokens, and edge cases
+- **Complexity**: O(T·(W+d)·Dₕ) vs O(T²·Dₕ) for dense attention
+
+### Configuration
+
+In YAML configs:
+
+```yaml
+model:
+  attention_type: sparse
+  window_size: 64        # Local window size
+  expander_degree: 8     # Number of long-range neighbors
+```
+
+### Complexity Comparison
+
+| Attention Type | Complexity | Memory | Example (T=512, W=64, d=8) |
+|---|---|---|---|
+| Dense | O(T²) | O(T²) | 262K positions/query |
+| Sparse | O(T·(W+d)) | O(T·(W+d)) | 36.8K positions/query |
+| **Speedup** | **~7x** | **~7x** | - |
+
+### Implementation Details
+
+**Index Generation** (`build_sparse_indices`):
+- Combines window + expander edges
+- Deduplicates overlapping positions
+- Refills with additional window positions if needed (maintains degree)
+- Pads with -1 for invalid positions (masked in attention)
+
+**Forward Pass**:
+- Gathers K, V using sparse indices
+- Computes attention scores over sparse neighbors
+- Applies validity mask (invalid -1 indices)
+- Applies padding/segment masks (gathered per neighbor)
+- Softmax and value aggregation
+
+**Per-Head Variation**:
+- Each head uses different offset: `head_offset = (head_idx * 7) % n`
+- Ensures diverse sparse patterns across heads
+- Improves coverage of long-range structure
+
+### Usage Example
+
+```python
+from orion.model import TinyDecoderOnly
+from orion.config import Config
+
+# Load config with sparse attention
+cfg = Config.from_yaml("configs/exp_sparse_smoke.yaml")
+
+# Build model (sparse attention automatically used)
+model = TinyDecoderOnly(cfg.model)
+
+# Train normally - sparse attention is transparent
+output = model(input_ids)
+loss = model.compute_loss(output, targets)
+```
+
+### When to Use
+
+- **Long sequences** (512+): Sparse attention reduces memory and compute
+- **Limited GPU memory**: O(T·(W+d)) vs O(T²) saves significant VRAM
+- **Stable training**: Window ensures short-range context, expander adds long-range
+- **Diverse patterns**: Per-head variation helps model learn multiple sparse views
+
+### Limitations
+
+- **Early tokens**: Effective degree smaller for q < W+d (only q+1 valid positions)
+- **Gather overhead**: expand().gather() pattern is correct but memory-bandwidth heavy at very long T
+- **Not block-sparse**: Uses dense gather, not specialized sparse kernels (future optimization)
+
+---
+
 ## Testing
 
 ### Run Tests

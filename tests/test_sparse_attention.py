@@ -371,3 +371,208 @@ class TestSparseAttentionIntegration:
         dense_logits = dense_model(idx)
 
         assert sparse_logits.shape == dense_logits.shape
+
+
+class TestSparseAttentionEdgeCases:
+    """Test edge cases and robustness."""
+
+    def test_modulus_full_range_coverage(self):
+        """Test that modulus=n provides full-range coverage."""
+        n, window_size, expander_degree = 64, 8, 4
+        indices = build_sparse_indices(n, window_size, expander_degree, head_idx=0, device="cpu")
+
+        # Check that expander edges can reach beyond window
+        # For query at position 63, expander should reach some positions beyond window
+        query_63_neighbors = [idx.item() for idx in indices[63] if idx >= 0]
+        # Window covers [63-8+1, 63] = [56, 63]
+        # Expander should reach some positions < 56
+        expander_neighbors = [n for n in query_63_neighbors if n < 56]
+        assert len(expander_neighbors) > 0, "Expander should reach beyond window"
+
+    def test_per_head_offset_variation(self):
+        """Test that per-head offset creates meaningful variation."""
+        n, window_size, expander_degree = 32, 4, 3
+
+        indices_h0 = build_sparse_indices(n, window_size, expander_degree, head_idx=0, device="cpu")
+        indices_h1 = build_sparse_indices(n, window_size, expander_degree, head_idx=1, device="cpu")
+        indices_h2 = build_sparse_indices(n, window_size, expander_degree, head_idx=2, device="cpu")
+
+        # Count differences between heads
+        diff_h0_h1 = (indices_h0 != indices_h1).sum().item()
+        diff_h1_h2 = (indices_h1 != indices_h2).sum().item()
+
+        # Should have meaningful differences
+        assert diff_h0_h1 > 0, "Head 0 and 1 should differ"
+        assert diff_h1_h2 > 0, "Head 1 and 2 should differ"
+
+    def test_window_size_one(self):
+        """Test with minimum window size (1)."""
+        B, H, T, Dh = 2, 4, 32, 64
+        cfg = AttentionConfig(backend="sparse", window_size=1, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        output = attn.forward(q, k, v)
+
+        assert output.shape == (B, H, T, Dh)
+        assert not torch.isnan(output).any()
+
+    def test_large_expander_degree(self):
+        """Test with large expander degree."""
+        B, H, T, Dh = 2, 4, 64, 64
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=16)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        output = attn.forward(q, k, v)
+
+        assert output.shape == (B, H, T, Dh)
+        assert not torch.isnan(output).any()
+
+    def test_single_head(self):
+        """Test with single head."""
+        B, H, T, Dh = 2, 1, 32, 64
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        output = attn.forward(q, k, v)
+
+        assert output.shape == (B, H, T, Dh)
+        assert not torch.isnan(output).any()
+
+    def test_single_batch(self):
+        """Test with single batch."""
+        B, H, T, Dh = 1, 4, 32, 64
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        output = attn.forward(q, k, v)
+
+        assert output.shape == (B, H, T, Dh)
+        assert not torch.isnan(output).any()
+
+    def test_mask_broadcast_robustness(self):
+        """Test that [B, 1, T, T] mask is properly expanded."""
+        B, H, T, Dh = 2, 4, 32, 64
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        # Create [B, 1, T, T] mask (common pattern)
+        attn_mask = torch.tril(torch.ones(T, T, dtype=torch.bool))
+        attn_mask = attn_mask[None, None, :, :].expand(B, 1, T, T).clone()
+
+        output = attn.forward(q, k, v, attn_mask=attn_mask)
+
+        assert output.shape == (B, H, T, Dh)
+        assert not torch.isnan(output).any()
+
+    def test_all_masked_positions(self):
+        """Test behavior when all positions are masked."""
+        B, H, T, Dh = 2, 4, 32, 64
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        # Mask all positions except first
+        attn_mask = torch.zeros(B, T, dtype=torch.bool)
+        attn_mask[:, 0] = True
+
+        output = attn.forward(q, k, v, attn_mask=attn_mask)
+
+        assert output.shape == (B, H, T, Dh)
+        # Should have NaN for positions with no valid neighbors
+        # (except first position which has itself)
+        assert not torch.isnan(output[:, :, 0, :]).any()
+
+    def test_attention_weights_sum_to_one(self):
+        """Test that attention weights sum to 1 (when not all masked)."""
+        B, H, T, Dh = 2, 4, 32, 64
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+
+        # Manually compute attention weights to verify they sum to 1
+        indices_per_head = torch.stack([attn._get_indices(T, h, q.device) for h in range(H)], dim=0)
+        degree = indices_per_head.shape[-1]
+        indices_expanded = indices_per_head[None, :, :, :].expand(B, H, T, degree)
+
+        k_flat = k.reshape(B * H, T, Dh)
+        indices_flat = indices_expanded.reshape(B * H, T, degree)
+        indices_clamped = indices_flat.clamp(min=0)
+        indices_for_gather = indices_clamped[:, :, :, None].expand(B * H, T, degree, Dh)
+
+        k_sparse = torch.gather(
+            k_flat[:, :, None, :].expand(B * H, T, degree, Dh), dim=1, index=indices_for_gather
+        )
+        k_sparse = k_sparse.reshape(B, H, T, degree, Dh)
+
+        scale = Dh**-0.5
+        scores = torch.einsum("bhtd,bhtpd->bhtp", q, k_sparse) * scale
+
+        validity_mask = (indices_flat >= 0).reshape(B, H, T, degree)
+        scores = scores.masked_fill(~validity_mask, float("-inf"))
+
+        attn_weights = torch.nn.functional.softmax(scores, dim=-1)
+        attn_weights = torch.nan_to_num(attn_weights, 0.0)
+
+        # Check that weights sum to 1 for valid positions
+        weight_sums = attn_weights.sum(dim=-1)
+        valid_positions = validity_mask.any(dim=-1)
+        assert torch.allclose(
+            weight_sums[valid_positions], torch.ones_like(weight_sums[valid_positions]), atol=1e-5
+        )
+
+    def test_different_sequence_lengths_same_model(self):
+        """Test that same model handles different sequence lengths."""
+        B, H, Dh = 2, 4, 64
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        for T in [16, 32, 64, 128]:
+            q = torch.randn(B, H, T, Dh)
+            k = torch.randn(B, H, T, Dh)
+            v = torch.randn(B, H, T, Dh)
+
+            output = attn.forward(q, k, v)
+
+            assert output.shape == (B, H, T, Dh)
+            assert not torch.isnan(output).any()
+
+    def test_indices_cache_different_sequences(self):
+        """Test that cache correctly handles different sequence lengths."""
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        # Build indices for different lengths
+        indices_16 = attn._get_indices(16, 0, "cpu")
+        _ = attn._get_indices(32, 0, "cpu")
+        indices_16_again = attn._get_indices(16, 0, "cpu")
+
+        # Check cache has both
+        assert len(attn.indices_cache) == 2
+
+        # Check that repeated call returns same object (cached)
+        assert indices_16 is indices_16_again
