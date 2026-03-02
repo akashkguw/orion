@@ -1,207 +1,113 @@
 # Orion
 
-A research framework for long-context, decoder-only Transformers with **structured sparse attention** (sliding window + expander edges) and stability controls (QK-norm, orthogonal init, spectral normalization).
+A research framework for long-context, decoder-only Transformers with **structured sparse attention** (sliding window + expander edges).
 
 **Key Features:**
-- Sparse Attention - O(T*(W+d)) complexity vs O(T^2) for dense (7x faster on 512 tokens)
-- Dense & Sparse Backends - Train with dense, sparse, or window attention
-- Real Metrics - Activation norm, attention entropy, long-context eval
-- Reproducible - Deterministic training with seed control and checkpoint management
-- Configurable - YAML-based configs for easy experimentation
-- Well-tested - 114 tests covering all components
-- Benchmarked - Configs for 256-4K context lengths
+- **Sparse Attention** - O(T·(W+d)) vs O(T²) dense (7x faster on 512 tokens)
+- **Multiple Backends** - Dense, sparse, and window attention
+- **Real Metrics** - Activation norm, attention entropy, long-context eval
+- **Reproducible** - Deterministic training with seed control
+- **Well-tested** - 136 tests covering all components
+- **Production-ready** - Configs for 256-4K context lengths
 
-**Table of Contents**
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Sparse Attention](#sparse-attention)
-- [Usage](#usage)
-- [Project Structure](#project-structure)
-- [Logging & Checkpoints](#logging--checkpoints)
-- [Testing](#testing)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
+**Quick Links:** [Installation](#installation) | [Quick Start](#quick-start) | [Usage](#usage) | [Development](#development)
 
 ---
 
 ## Quick Start
 
-### Google Colab (Recommended - No Setup Required)
-
-Click to open in Colab: [Orion-Master.ipynb](https://colab.research.google.com/github/akashkguw/orion/blob/main/orion.ipynb)
-
+**Local Setup (5 minutes):**
 ```bash
-# In Colab cell:
-!git clone https://github.com/akashkguw/orion.git
-%cd orion
-!pip -q install -r requirements.txt -r requirements-dev.txt
-!python -m orion.train --config configs/golden.yaml
-```
-
-**Colab Tips:**
-- Pre-configured with GPU access
-- All dependencies pre-installed
-- Perfect for quick experiments
-- Save results to Google Drive
-
-### Local Setup (5 minutes)
-
-```bash
-# Clone and setup
-git clone https://github.com/akashkguw/orion.git
-cd orion
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
+git clone https://github.com/akashkguw/orion.git && cd orion
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
-
-# Run first training
 python -m orion.train --config configs/golden.yaml
 ```
+
+**Google Colab (No Setup):**
+Click to open: [Orion-Master.ipynb](https://colab.research.google.com/github/akashkguw/orion/blob/main/orion.ipynb)
 
 ---
 
 ## Installation
 
-### Requirements
+**Requirements:** Python 3.10+, PyTorch 2.0+, GPU optional (CUDA 11.8+)
 
-- **Python**: 3.10+
-- **PyTorch**: 2.0+
-- **GPU** (optional): CUDA 11.8+ for GPU acceleration
-
-### Setup Options
-
-**Option 1: Development Setup (Recommended)**
+**Setup:**
 ```bash
-make dev
+make dev                    # Development setup (recommended)
+# OR
+pip install -r requirements.txt -r requirements-dev.txt && pip install -e .
 ```
 
-**Option 2: Manual Setup**
+**Verify:**
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
-pip install -e .
-```
-
-**Verify Installation:**
-```bash
-python -c "import orion; print('Orion installed')"
-pytest tests/ -q  # Run quick test
+python -c "import orion; print('✓ Orion installed')"
+make test                   # Run quick test
 ```
 
 ---
 
 ## Sparse Attention
 
-### What is Sparse Attention?
-
-Sparse attention reduces the computational complexity of self-attention from **O(T²)** to **O(T·(W+d))** by attending to only a subset of positions:
-
+Sparse attention reduces complexity from **O(T²)** to **O(T·(W+d))** by attending to:
 - **Local Window** - Dense context for nearby tokens
 - **Expander Edges** - Structured long-range connections
 
-This enables efficient modeling of long sequences while maintaining model capacity.
-
-### Architecture
-
-Each query position q attends to:
-
+**Example (T=512, W=64, d=8):**
 ```
-Window:   [q-W+1, ..., q-1, q]           (local context)
-Expander: [q-offset₁, q-offset₂, ...]    (long-range)
+Query at position 100 attends to:
+  Window:   [37-100]           (64 positions)
+  Expander: [99, 96, 89, ...]  (8 positions)
+  Total:    72 positions vs 512 for dense (7.1x speedup)
 ```
 
-**Example:** Query at position 10 with W=4, d=3:
-```
-Window:   [7, 8, 9, 10]
-Expander: [9, 6, 1]  (via quadratic residues)
-Total:    [1, 6, 7, 8, 9, 10]  (7 positions vs 11 for dense)
-```
-
-### Performance
-
-| Metric | Dense | Sparse | Speedup |
-|--------|-------|--------|---------|
-| **Complexity** | O(T²) | O(T·(W+d)) | ~7x |
-| **Memory** | O(T²·Dₕ) | O(T·(W+d)·Dₕ) | ~7x |
-| **Example (T=512, W=64, d=8)** | 262K pos/query | 36.8K pos/query | 7.1x |
-
-### Key Features
-
-- **Causality** - Only attend to positions ≤ q  
-- **Per-Head Variation** - Different patterns per head  
-- **Masking** - Respects padding and segment boundaries  
-- **Deterministic** - Reproducible across runs  
-- **Robust** - Handles edge cases (T=0, early tokens, etc.)
-
-### Configuration
-
+**Configuration:**
 ```yaml
 model:
   attention_type: sparse
-  window_size: 64        # Local window (must be ≥ 1)
+  window_size: 64        # Local window
   expander_degree: 8     # Long-range neighbors
 ```
 
-### When to Use
-
+**When to Use:**
 | Scenario | Recommendation |
 |----------|---|
-| **Long sequences** (512+) | Use sparse |
-| **Limited GPU memory** | Use sparse |
-| **Short sequences** (<256) | Dense is simpler |
-| **Maximum accuracy** | Dense may be better |
+| Long sequences (512+) | Use sparse |
+| Limited GPU memory | Use sparse |
+| Short sequences (<256) | Dense is simpler |
 
-### Learn More
-
-For deep technical details, see [SPARSE_ATTENTION_ARCHITECTURE.md](SPARSE_ATTENTION_ARCHITECTURE.md)
+For details, see [SPARSE_ATTENTION_ARCHITECTURE.md](SPARSE_ATTENTION_ARCHITECTURE.md)
 
 ---
 
 ## Usage
 
-### Training
-
-**Basic training:**
+**Training:**
 ```bash
 python -m orion.train --config configs/golden.yaml
+python -m orion.train --config configs/golden.yaml --resume  # Resume from latest
 ```
 
-**With custom parameters:**
+**Evaluation:**
 ```bash
-python -m orion.train --config configs/golden.yaml \
-  --save-every 50 \
-  --seed 42
+python -m orion.eval --config configs/golden.yaml --checkpoint runs/latest/checkpoint.pt
 ```
 
-**Resume from checkpoint:**
+**View Metrics:**
 ```bash
-# Resume from latest
-python -m orion.train --config configs/golden.yaml --resume
-
-# Resume from specific checkpoint
-python -m orion.train --config configs/golden.yaml \
-  --resume runs/exp_shakespeare_dense/checkpoint.pt
+tail -n 5 runs/latest/metrics.jsonl                    # Last 5 steps
+cat runs/latest/metrics.jsonl | jq .                   # Pretty print
+cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract field
 ```
 
-**Outputs:**
-- `runs/latest/metrics.jsonl` - Training metrics (loss, perplexity, time)
-- `runs/latest/checkpoint.pt` - Model checkpoint (weights, optimizer state, config)
+**Available Configs:**
+- `golden.yaml` - Dense attention baseline
+- `exp_sparse_smoke.yaml` - Sparse attention (quick test)
+- `exp_sparse_window_256.yaml` - Sparse with larger window
+- `tinyshakespeare_*.yaml` - Various configurations
 
-### Evaluation
-
-```bash
-python -m orion.eval --config configs/golden.yaml \
-  --checkpoint runs/latest/checkpoint.pt
-```
-
-### Configuration
-
-Configs are YAML files in `configs/` directory. Example structure:
-
+**Configuration Example:**
 ```yaml
 run:
   out_dir: runs/exp_shakespeare_dense
@@ -216,7 +122,7 @@ data:
   batch_size: 16
 
 model:
-  name: tiny
+  name: orion
   d_model: 256
   n_layers: 4
   n_heads: 4
@@ -226,53 +132,25 @@ model:
 
 optim:
   lr: 3e-4
-  weight_decay: 0.1
 ```
 
-**Available Configs:**
-- `golden.yaml` - Dense attention baseline
-- `exp_sparse_smoke.yaml` - Sparse attention (quick test)
-- `exp_sparse_window_256.yaml` - Sparse with larger window
-- `tinyshakespeare_*.yaml` - Various configurations
+## Metrics
 
----
+Orion logs detailed metrics at multiple frequencies:
 
-## Comprehensive Metrics
+**Every Step:**
+- `loss`, `ppl`, `throughput_tokens_per_sec`, `grad_norm`, `diverged`
 
-Orion logs detailed metrics at multiple frequencies to track model quality, efficiency, stability, and sparse attention health.
-
-### Metrics Categories
-
-**Every Step (Always-On):**
-- `loss` - Cross-entropy loss
-- `ppl` - Perplexity (exp(loss))
-- `throughput_tokens_per_sec` - Training speed
-- `grad_norm` - Gradient norm (post-clip)
-- `grad_norm_pre_clip` - Gradient norm (pre-clip, optional)
-- `diverged` - Boolean divergence flag (NaN/Inf detected)
-
-**Every 50 Steps (Windowed):**
-- `vram_peak_mib` - Peak GPU memory in MiB
-- `divergence_rate` - Fraction of diverged steps in window
-- `activation_norm_rms` - Residual stream RMS
-- `attention_entropy` - Raw entropy of attention weights
-- `attention_entropy_normalized` - Normalized entropy (0-1)
+**Every 50 Steps:**
+- `vram_peak_mib`, `divergence_rate`, `activation_norm_rms`, `attention_entropy`, `attention_entropy_normalized`
 
 **Once Per Run:**
-- `attention_degree` - window_size + expander_degree
-- `compute_proxy_per_token` - Attention compute per token
-- `compute_proxy_per_step` - Attention compute per step
+- `attention_degree`, `compute_proxy_per_token`, `compute_proxy_per_seq`, `compute_proxy_per_step`
 
-**Every 1000 Steps (Evaluation):**
-- `eval_ppl_512` - Perplexity at 512 tokens
-- `eval_ppl_1024` - Perplexity at 1024 tokens
-- `eval_ppl_2048` - Perplexity at 2048 tokens
-- `eval_ppl_4096` - Perplexity at 4096 tokens
+**Every 1000 Steps:**
+- `eval_ppl_512`, `eval_ppl_1024`, `eval_ppl_2048`, `eval_ppl_4096`
 
-### Metrics File Format
-
-All metrics logged to `{run_dir}/metrics.jsonl` with type field:
-
+**Format:** All metrics logged to `{run_dir}/metrics.jsonl` (JSONL = JSON Lines):
 ```json
 {"type": "run_metrics", "step": 1, "attention_degree": 72, ...}
 {"type": "step", "step": 1, "loss": 5.73, "ppl": 307.56, ...}
@@ -280,386 +158,155 @@ All metrics logged to `{run_dir}/metrics.jsonl` with type field:
 {"type": "eval", "step": 1000, "eval_ppl_512": 12.5, ...}
 ```
 
-### Viewing Metrics
-
-```bash
-# View all metrics
-cat runs/latest/metrics.jsonl | jq .
-
-# View only step metrics
-cat runs/latest/metrics.jsonl | jq 'select(.type == "step")'
-
-# Extract specific field
-cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'
-
-# Compare Dense vs Sparse throughput
-paste <(cat runs/exp_dense/metrics.jsonl | jq -r 'select(.type == "step") | .throughput_tokens_per_sec') \
-      <(cat runs/exp_sparse/metrics.jsonl | jq -r 'select(.type == "step") | .throughput_tokens_per_sec')
-```
-
-For detailed metrics documentation, see [COMPREHENSIVE_METRICS_GUIDE.md](COMPREHENSIVE_METRICS_GUIDE.md).
-
----
+For details, see [COMPREHENSIVE_METRICS_GUIDE.md](COMPREHENSIVE_METRICS_GUIDE.md)
 
 ## Project Structure
 
 ```
 orion/
-├── attention/              # Attention mechanisms
-│   ├── base.py            # Base attention interface & factory
-│   ├── dense.py           # Dense attention
-│   ├── sparse.py          # Sparse attention (window + expander)
-│   ├── window.py          # Sliding window attention
-│   └── mask/
-│       └── builder.py     # Attention mask utilities
-├── data/                  # Data loading
-│   ├── __init__.py
-│   └── shakespeare.py     # Shakespeare dataset
-├── models/                # Model components
-│   └── blocks.py          # Transformer blocks
-├── model.py               # Main model (TinyDecoderOnly)
-├── config.py              # Configuration loading
-├── train.py               # Training loop
-├── eval.py                # Evaluation script
-├── logging_utils.py       # Metrics logging
-├── run_paths.py           # Run directory management
-└── train_utils.py         # Training utilities
+├── attention/              # Attention mechanisms (dense, sparse, window)
+├── data/                   # Data loading (Shakespeare dataset)
+├── models/                 # Model components (transformer blocks)
+├── model.py                # Main models (TinyDecoderOnly, OrionDecoder)
+├── config.py               # Configuration loading
+├── train.py                # Training loop with metrics
+├── eval.py                 # Evaluation at long contexts
+├── metrics.py              # Metrics tracking system
+├── logging_utils.py        # JSONL metrics logging
+└── train_utils.py          # Training utilities
 
-configs/                   # Training configurations
-tests/                     # Test suite (82+ tests)
-runs/                      # Training outputs
+configs/                     # Training configurations
+tests/                       # 136 tests (sparse, dense, metrics, models)
+runs/                        # Training outputs (checkpoints, metrics)
 ```
-
----
 
 ## Logging & Checkpoints
 
-### Run Directory Convention
-
-All runs are organized under `runs/`:
-
+**Run Directory:**
 ```
 runs/
-├── latest/                    # Most recent run (symlink/copy)
-│   ├── checkpoint.pt         # Model checkpoint
-│   └── metrics.jsonl         # Training metrics
-├── exp_shakespeare_dense/     # Named experiment
-│   ├── checkpoint.pt
-│   └── metrics.jsonl
-└── exp_sparse_smoke/          # Another experiment
-    ├── checkpoint.pt
-    └── metrics.jsonl
+├── latest/                 # Most recent run
+│   ├── checkpoint.pt      # Model weights + optimizer state
+│   └── metrics.jsonl      # Training metrics
+├── exp_shakespeare_dense/  # Named experiment
+└── exp_sparse_smoke/       # Another experiment
 ```
 
-### Metrics Format
-
-Metrics are logged to `metrics.jsonl` (JSONL = JSON Lines, one object per line):
-
-```json
-{
-  "step": 1,
-  "loss": 5.728669166564941,
-  "ppl": 307.5596923828125,
-  "wall_time_s": 0.03218197822570801,
-  "vram_max_mb": 2048
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `step` | int | Training step (1-indexed) |
-| `loss` | float | Cross-entropy loss |
-| `ppl` | float | Perplexity (exp(loss)) |
-| `wall_time_s` | float | Cumulative wall-clock time |
-| `vram_max_mb` | int | Peak GPU memory (GPU only) |
-
-**View metrics:**
-```bash
-# Last 5 steps
-tail -n 5 runs/latest/metrics.jsonl
-
-# Pretty print
-cat runs/latest/metrics.jsonl | jq .
-
-# Extract specific field
-cat runs/latest/metrics.jsonl | jq '.loss'
-```
-
-### Checkpoint Format
-
-Checkpoints are PyTorch `.pt` files containing:
-
+**Checkpoint Format:**
 ```python
 {
-    "model": model.state_dict(),           # Model weights
-    "opt": optimizer.state_dict(),         # Optimizer state
-    "scheduler": scheduler.state_dict(),   # LR scheduler state
-    "step": 100,                           # Training step
-    "epoch": 100,                          # Training epoch
-    "seed": 123,                           # Random seed
-    "config": cfg.raw,                     # Full config dict
-    "rng_state": {...},                    # RNG state for deterministic resume
+    "model": model.state_dict(),      # Model weights
+    "opt": optimizer.state_dict(),    # Optimizer state
+    "step": 100,                      # Training step
+    "seed": 123,                      # Random seed
+    "config": cfg.raw,                # Full config dict
 }
 ```
 
-**Load checkpoint in code:**
-
+**Load Checkpoint:**
 ```python
 import torch
-from orion.model import TinyDecoderOnly
-
-# Load checkpoint
 ckpt = torch.load("runs/latest/checkpoint.pt", map_location="cpu")
-
-# Create model and load weights
-model = TinyDecoderOnly(...)
 model.load_state_dict(ckpt["model"])
-
-# Access metadata
 seed = ckpt["seed"]
-config = ckpt["config"]
-step = ckpt["step"]
 ```
-
----
 
 ## Testing
 
-### Run Tests
-
+**Run Tests:**
 ```bash
-# Full test suite
-make test
-
-# Specific test file
-pytest tests/test_sparse_attention.py -v
-
-# With coverage report
-pytest --cov=orion tests/
-
-# Quick smoke test (5 steps)
-make smoke
+make test                   # All 136 tests
+pytest tests/test_sparse_attention.py -v  # Specific file
+pytest --cov=orion tests/   # With coverage
+make smoke                  # Quick 5-step test
 ```
 
-### Test Coverage
-
-**114 tests** across 11 test files:
-
-| Category | Tests | Coverage |
-|----------|-------|----------|
-| Sparse Attention | 21 | Index generation, forward pass, masking, edge cases |
-| Model | 8 | Forward pass, loss computation, device handling |
-| Model Combinations | 4 | All model/attention backends (tiny, orion+dense/sparse/window) |
-| Config | 6 | YAML loading, hierarchical access, validation |
-| Data | 3 | Tokenizer, encoding, roundtrip |
-| Causal Mask | 6 | Mask patterns, causality, variable lengths |
-| Checkpoint | 4 | Save/load, metadata, device transfer |
-| Logging | 10 | JSONL format, field validation |
-| Metrics | 28 | Step/window/eval/run metrics, entropy, activation norm |
-| CLI | 4 | Command parsing, argument handling |
-| Orion Decoder | 10 | Decoder-specific tests |
-
----
+**Test Coverage (136 tests):**
+- Sparse Attention (21) - Index generation, forward pass, masking
+- Dense Attention (22) - Causality, masking, caching, gradients
+- Metrics (28) - Step/window/eval metrics, entropy, activation norm
+- Models (12) - Forward pass, device handling, all backends
+- Config (6) - YAML loading, hierarchical access
+- Data (3) - Tokenizer, encoding
+- Causal Mask (6) - Mask patterns, causality
+- Checkpoint (4) - Save/load, metadata
+- Logging (10) - JSONL format, validation
+- CLI (4) - Command parsing
+- Orion Decoder (10) - Decoder-specific tests
 
 ## Development
 
-### Setup
-
+**Setup:**
 ```bash
-make dev
+make dev                    # Install dev dependencies
 ```
 
-### Common Commands
-
+**Commands:**
 ```bash
-# Training
-make train         # Full training run (configs/golden.yaml)
-make smoke         # Quick 5-step training test (CPU)
-
-# Code Quality
-make lint          # Run linter (ruff check)
-make format        # Auto-format code (ruff format)
-make format-check  # Check formatting without changes
-
-# Testing
-make test          # Run all tests (114 tests)
-
-# Evaluation
-make eval          # Evaluate checkpoint (runs/latest/checkpoint.pt)
+make train                  # Full training (configs/golden.yaml)
+make smoke                  # Quick 5-step test
+make test                   # Run all 136 tests
+make lint                   # Lint check (ruff)
+make format                 # Auto-format code
+make format-check           # Check formatting
+make eval                   # Evaluate checkpoint
 ```
 
-### Training Examples
-
-**Train with default config:**
+**Training Examples:**
 ```bash
+# Default config
 python -m orion.train --config configs/golden.yaml
-```
 
-**Train with custom parameters:**
-```bash
-python -m orion.train --config configs/golden.yaml \
-  --save-every 50 \
-  --device cuda
-```
+# Custom parameters
+python -m orion.train --config configs/golden.yaml --save-every 50
 
-**Resume from checkpoint:**
-```bash
 # Resume from latest
 python -m orion.train --config configs/golden.yaml --resume
 
-# Resume from specific checkpoint
-python -m orion.train --config configs/golden.yaml \
-  --resume runs/exp_shakespeare_dense/checkpoint.pt
-```
-
-**Train different model/attention combinations:**
-```bash
-# Dense attention (baseline)
-python -m orion.train --config configs/exp_dense.yaml
-
-# Sparse attention
+# Different models/attention
 python -m orion.train --config configs/exp_sparse_smoke.yaml
-
-# Window attention
 python -m orion.train --config configs/exp_window_256.yaml
-
-# TinyDecoderOnly (simple baseline)
-python -m orion.train --config configs/tinyshakespeare_dense.yaml
 ```
 
-### Evaluation Examples
-
-**Evaluate latest checkpoint:**
+**Metrics Inspection:**
 ```bash
-python -m orion.eval --config configs/golden.yaml \
-  --checkpoint runs/latest/checkpoint.pt
+tail -n 5 runs/latest/metrics.jsonl                    # Last 5 steps
+cat runs/latest/metrics.jsonl | jq .                   # Pretty print
+cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract field
 ```
 
-**Evaluate specific run:**
+**Code Quality:**
+- Linter: Ruff (E, F, I, B, UP rules)
+- Formatter: Ruff format
+- Type Checking: Full type annotations
+- Tests: 136 tests (sparse, dense, metrics, models)
+- Python: 3.10+ (target 3.11)
+
+**CI Pipeline:**
 ```bash
-python -m orion.eval --config configs/exp_sparse_smoke.yaml \
-  --checkpoint runs/exp_sparse_smoke/checkpoint.pt
+make test lint format-check  # Local CI (before commit)
 ```
 
-### Testing
-
-**Run all tests:**
-```bash
-make test
-# Output: 114 passed in 1.5s
-```
-
-**Run specific test file:**
-```bash
-pytest tests/test_sparse_attention.py -v
-pytest tests/test_metrics.py -v
-pytest tests/test_all_models.py -v
-```
-
-**Run with coverage:**
-```bash
-pytest --cov=orion tests/
-```
-
-**Test specific model/attention combinations:**
-```bash
-# Tests all 4 combinations: tiny, orion+dense, orion+sparse, orion+window
-pytest tests/test_all_models.py -v
-```
-
-### Code Quality
-
-- **Linter**: Ruff (E, F, I, B, UP rules)
-- **Formatter**: Ruff format
-- **Type Checking**: Full type annotations
-- **Tests**: Pytest with 114 tests (110 original + 4 model tests)
-- **Python**: 3.10+ (target 3.11)
-
-### CI/CD Pipeline
-
-**Local CI (before commit):**
-```bash
-make test lint format-check
-# All checks must pass
-```
-
-**Full CI output:**
-```
-pytest -q
-114 passed in 1.5s
-
-ruff check .
-All checks passed!
-
-ruff format --check .
-35 files already formatted
-```
-
-**GitHub Actions** runs on every PR and push to main:
-
-1. **Lint & Format** - Code quality checks (ruff)
-2. **Unit Tests** - Full test suite (114 tests)
-3. **Smoke Test** - 5-step training on CPU
-
-All checks must pass before merge.
-
-### Metrics Inspection
-
-**View training metrics:**
-```bash
-# Last 5 steps
-tail -n 5 runs/latest/metrics.jsonl
-
-# Pretty print all metrics
-cat runs/latest/metrics.jsonl | jq .
-
-# View only step metrics
-cat runs/latest/metrics.jsonl | jq 'select(.type == "step")'
-
-# Extract specific field (e.g., loss)
-cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'
-
-# Compare throughput across runs
-paste <(cat runs/exp_dense/metrics.jsonl | jq -r 'select(.type == "step") | .throughput_tokens_per_sec') \
-      <(cat runs/exp_sparse/metrics.jsonl | jq -r 'select(.type == "step") | .throughput_tokens_per_sec')
-```
-
-**Metrics types logged:**
-- `run_metrics` - Once at startup (compute proxy)
-- `step` - Every step (loss, ppl, throughput, grad norm)
-- `window` - Every 50 steps (VRAM, activation norm, attention entropy)
-- `eval` - Every 1000 steps (perplexity at 512/1024/2048/4096 tokens)
+GitHub Actions runs on every PR:
+1. Lint & Format checks
+2. Full test suite (136 tests)
+3. Smoke test (5-step training)
 
 ---
 
 ## Contributing
 
-### Editing the Colab Notebook
+**To contribute:**
+1. Fork the repo and create a branch: `git checkout -b my-feature main`
+2. Make changes and test: `make test lint format-check`
+3. Push and create a PR
+4. Wait for CI checks to pass
 
-1. **Create a branch:**
-   ```bash
-   git checkout -b my-feature main
-   git push -u origin my-feature
-   ```
-
-2. **Open in Colab:**
-   - Go to: `https://colab.research.google.com/github/akashkguw/orion/blob/my-feature/orion.ipynb`
-   - Make your changes
-
-3. **Save to GitHub:**
-   - Click **File → Save a copy in GitHub**
-   - Select your branch and save
-
-4. **Create PR:**
-   - Open PR from `my-feature` into `main`
-   - Wait for CI checks to pass
-
-### Code Style
-
+**Code Style:**
 - Follow PEP 8
 - Use type annotations
-- Add docstrings to functions
-- Keep functions focused and small
+- Add docstrings
+- Keep functions focused
 
 ---
 
