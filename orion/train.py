@@ -217,52 +217,63 @@ def train(
                 from .attention.dense import DenseAttention
                 from .attention.sparse import SparseAttention
 
-                # Handle both OrionDecoder (ModuleList) and TinyDecoderOnly (TransformerEncoder)
-                first_block = None
-                attn_backend = None
+                # Find first SparseAttention module anywhere in model (robust approach)
+                sparse_backend = next(
+                    (m for m in model.modules() if isinstance(m, SparseAttention)), None
+                )
+                dense_backend = next(
+                    (m for m in model.modules() if isinstance(m, DenseAttention)), None
+                )
 
-                if hasattr(model.blocks, "__getitem__"):  # ModuleList (OrionDecoder)
-                    first_block = model.blocks[0]
-                    attn_backend = getattr(first_block, "attn", None)
-                elif hasattr(model.blocks, "layers"):  # TransformerEncoder (TinyDecoderOnly)
-                    # TinyDecoderOnly uses nn.TransformerEncoder with nn.MultiheadAttention
-                    # which doesn't expose attention weights easily, so entropy stays 0.0
-                    attn_backend = None
+                # Debug: print backend info once per window
+                if step == 50:
+                    print(f"DEBUG: sparse_backend found = {sparse_backend is not None}")
+                    print(f"DEBUG: dense_backend found = {dense_backend is not None}")
 
-                if attn_backend is not None and isinstance(
-                    attn_backend, (DenseAttention, SparseAttention)
-                ):
-                    # Debug: print backend info once per window
-                    if step == 50:  # Only print on first window
-                        print(f"DEBUG: attn_backend type = {type(attn_backend).__name__}")
-                        weights = getattr(attn_backend, "last_attn_weights", None)
-                        print(f"DEBUG: last_attn_weights is None = {weights is None}")
-                        if weights is not None:
-                            print(
-                                f"DEBUG: weights.shape={weights.shape}, "
-                                f"sum={weights.sum().item():.4f}, "
-                                f"max={weights.max().item():.4f}"
-                            )
-                        entropy = getattr(attn_backend, "last_attn_entropy", 0.0)
-                        print(f"DEBUG: last_attn_entropy = {entropy:.6f}")
-
-                    # Read pre-computed metrics from backend
-                    attention_entropy = getattr(attn_backend, "last_attn_entropy", 0.0)
+                # Try sparse first
+                if sparse_backend is not None:
+                    w = sparse_backend.last_attn_weights
+                    print(f"DEBUG: sparse weights None = {w is None}")
+                    if w is not None:
+                        print(
+                            f"DEBUG: sparse weights shape = {tuple(w.shape)}, "
+                            f"sum = {float(w.sum().item()):.1f}, "
+                            f"max = {float(w.max().item()):.4f}"
+                        )
+                    attention_entropy = getattr(sparse_backend, "last_attn_entropy", 0.0)
                     attention_entropy_normalized = getattr(
-                        attn_backend, "last_attn_entropy_normalized", 0.0
+                        sparse_backend, "last_attn_entropy_normalized", 0.0
                     )
-
-                    # Sparse-specific metrics
-                    if isinstance(attn_backend, SparseAttention):
-                        valid_neighbor_fraction = getattr(
-                            attn_backend, "last_valid_neighbor_fraction", 0.0
+                    valid_neighbor_fraction = getattr(
+                        sparse_backend, "last_valid_neighbor_fraction", 0.0
+                    )
+                    attention_mass_window_pct = getattr(
+                        sparse_backend, "last_attention_mass_window_pct", 0.0
+                    )
+                    attention_mass_expander_pct = getattr(
+                        sparse_backend, "last_attention_mass_expander_pct", 0.0
+                    )
+                    if step == 50:
+                        print(
+                            f"DEBUG: sparse entropy = {attention_entropy:.6f}, "
+                            f"valid_neighbors = {valid_neighbor_fraction:.4f}"
                         )
-                        attention_mass_window_pct = getattr(
-                            attn_backend, "last_attention_mass_window_pct", 0.0
+                # Fall back to dense
+                elif dense_backend is not None:
+                    w = dense_backend.last_attn_weights
+                    print(f"DEBUG: dense weights None = {w is None}")
+                    if w is not None:
+                        print(
+                            f"DEBUG: dense weights shape = {tuple(w.shape)}, "
+                            f"sum = {float(w.sum().item()):.1f}, "
+                            f"max = {float(w.max().item()):.4f}"
                         )
-                        attention_mass_expander_pct = getattr(
-                            attn_backend, "last_attention_mass_expander_pct", 0.0
-                        )
+                    attention_entropy = getattr(dense_backend, "last_attn_entropy", 0.0)
+                    attention_entropy_normalized = getattr(
+                        dense_backend, "last_attn_entropy_normalized", 0.0
+                    )
+                    if step == 50:
+                        print(f"DEBUG: dense entropy = {attention_entropy:.6f}")
             except (AttributeError, IndexError, TypeError) as e:
                 print(f"DEBUG: Exception in metrics reading: {type(e).__name__}: {e}")
 
