@@ -219,37 +219,52 @@ def train(
 
                 # Handle both OrionDecoder (ModuleList) and TinyDecoderOnly (TransformerEncoder)
                 first_block = None
-                if hasattr(model.blocks, "__getitem__"):  # ModuleList
+                attn_backend = None
+
+                if hasattr(model.blocks, "__getitem__"):  # ModuleList (OrionDecoder)
                     first_block = model.blocks[0]
-                elif hasattr(model.blocks, "layers"):  # TransformerEncoder
-                    first_block = model.blocks.layers[0]
+                    attn_backend = getattr(first_block, "attn", None)
+                elif hasattr(model.blocks, "layers"):  # TransformerEncoder (TinyDecoderOnly)
+                    # TinyDecoderOnly uses nn.TransformerEncoder with nn.MultiheadAttention
+                    # which doesn't expose attention weights easily, so entropy stays 0.0
+                    attn_backend = None
 
-                if first_block is not None:
-                    attn_backend = getattr(first_block, "attn", None) or getattr(
-                        first_block, "self_attn", None
-                    )
-                    if attn_backend is not None:
-                        attn_backend = getattr(attn_backend, "attn_backend", attn_backend)
-                        if isinstance(attn_backend, (DenseAttention, SparseAttention)):
-                            # Read pre-computed metrics from backend
-                            attention_entropy = getattr(attn_backend, "last_attn_entropy", 0.0)
-                            attention_entropy_normalized = getattr(
-                                attn_backend, "last_attn_entropy_normalized", 0.0
+                if attn_backend is not None and isinstance(
+                    attn_backend, (DenseAttention, SparseAttention)
+                ):
+                    # Debug: print backend info once per window
+                    if step == 50:  # Only print on first window
+                        print(f"DEBUG: attn_backend type = {type(attn_backend).__name__}")
+                        weights = getattr(attn_backend, "last_attn_weights", None)
+                        print(f"DEBUG: last_attn_weights is None = {weights is None}")
+                        if weights is not None:
+                            print(
+                                f"DEBUG: weights.shape={weights.shape}, "
+                                f"sum={weights.sum().item():.4f}, "
+                                f"max={weights.max().item():.4f}"
                             )
+                        entropy = getattr(attn_backend, "last_attn_entropy", 0.0)
+                        print(f"DEBUG: last_attn_entropy = {entropy:.6f}")
 
-                            # Sparse-specific metrics
-                            if isinstance(attn_backend, SparseAttention):
-                                valid_neighbor_fraction = getattr(
-                                    attn_backend, "last_valid_neighbor_fraction", 0.0
-                                )
-                                attention_mass_window_pct = getattr(
-                                    attn_backend, "last_attention_mass_window_pct", 0.0
-                                )
-                                attention_mass_expander_pct = getattr(
-                                    attn_backend, "last_attention_mass_expander_pct", 0.0
-                                )
-            except (AttributeError, IndexError, TypeError):
-                pass  # Silently skip if path doesn't exist or is wrong type
+                    # Read pre-computed metrics from backend
+                    attention_entropy = getattr(attn_backend, "last_attn_entropy", 0.0)
+                    attention_entropy_normalized = getattr(
+                        attn_backend, "last_attn_entropy_normalized", 0.0
+                    )
+
+                    # Sparse-specific metrics
+                    if isinstance(attn_backend, SparseAttention):
+                        valid_neighbor_fraction = getattr(
+                            attn_backend, "last_valid_neighbor_fraction", 0.0
+                        )
+                        attention_mass_window_pct = getattr(
+                            attn_backend, "last_attention_mass_window_pct", 0.0
+                        )
+                        attention_mass_expander_pct = getattr(
+                            attn_backend, "last_attention_mass_expander_pct", 0.0
+                        )
+            except (AttributeError, IndexError, TypeError) as e:
+                print(f"DEBUG: Exception in metrics reading: {type(e).__name__}: {e}")
 
             window_metrics = metrics_tracker.record_window_metrics(
                 step=step,
