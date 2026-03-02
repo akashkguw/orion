@@ -48,7 +48,7 @@ pip install -r requirements.txt -r requirements-dev.txt && pip install -e .
 
 **Verify:**
 ```bash
-python -c "import orion; print('✓ Orion installed')"
+python -c "import orion; print('Orion installed')"
 make test                   # Run quick test
 ```
 

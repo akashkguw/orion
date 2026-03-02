@@ -44,14 +44,14 @@ def build_sparse_indices(
     indices_list = []
 
     for q in range(n):
-        neighbors = set()
-
         # 1. Local window: [q-window_size, ..., q-1, q]
+        window_neighbors = []
         window_start = max(0, q - window_size + 1)
         for i in range(window_start, q + 1):
-            neighbors.add(i)
+            window_neighbors.append(i)
 
         # 2. Expander edges using modular arithmetic with per-head offset
+        expander_neighbors = []
         if n > 1:
             mod = n  # Full-range modulus for better coverage
             head_offset = (head_idx * 7) % mod  # Prime-like multiplier for variation
@@ -60,11 +60,11 @@ def build_sparse_indices(
                 offset = ((s * s) + head_offset) % mod
                 k = q - offset
                 # Note: When offset == 0, k == q (self-attention), which is deduped by set
-                if k >= 0:
-                    neighbors.add(k)
+                if k >= 0 and k not in window_neighbors:
+                    expander_neighbors.append(k)
 
-        # Convert to sorted list (descending for locality)
-        neighbors_list = sorted(neighbors, reverse=True)
+        # Combine: window first, then expander
+        neighbors_list = window_neighbors + expander_neighbors
 
         # Refill strategy: pad with additional window positions if needed
         if len(neighbors_list) < target_degree:
@@ -76,8 +76,6 @@ def build_sparse_indices(
                 if i not in neighbors_set and len(neighbors_list) < target_degree:
                     neighbors_list.append(i)
                     neighbors_set.add(i)
-
-            neighbors_list = sorted(neighbors_list, reverse=True)
 
         # Truncate to exact degree and pad with -1 (invalid)
         neighbors_list = neighbors_list[:target_degree]

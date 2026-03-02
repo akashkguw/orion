@@ -165,7 +165,14 @@ def train(
             scheduler.step()
 
         step_time_sec = time.time() - step_time_start
+        step_time_ms = step_time_sec * 1000.0
         throughput = metrics_tracker.compute_throughput(batch_size, seq_len, step_time_sec)
+
+        # Compute top-1 accuracy
+        accuracy_top1 = metrics_tracker.compute_top1_accuracy(logits, y)
+
+        # Get current learning rate
+        learning_rate = opt.param_groups[0]["lr"]
 
         # Record step metrics (every step)
         step_metrics = metrics_tracker.record_step_metrics(
@@ -173,6 +180,9 @@ def train(
             loss=float(loss.item()),
             grad_norm=grad_norm,
             throughput=throughput,
+            step_time_ms=step_time_ms,
+            accuracy_top1=accuracy_top1,
+            learning_rate=learning_rate,
         )
         logger.log({"type": "step", **metrics_to_dict(step_metrics)})
 
@@ -203,6 +213,9 @@ def train(
             # externally without modifying/replacing modules or using hooks.
             attention_entropy = 0.0
             attention_entropy_normalized = 0.0
+            valid_neighbor_fraction = 0.0
+            attention_mass_window_pct = 0.0
+            attention_mass_expander_pct = 0.0
 
             # Try to get attention weights from the first layer's attention backend
             try:
@@ -237,6 +250,18 @@ def train(
                                 )
                                 attention_entropy = entropy
                                 attention_entropy_normalized = entropy_norm
+
+                                # Compute sparse-specific metrics
+                                if isinstance(attn_backend, SparseAttention):
+                                    valid_neighbor_fraction = (
+                                        metrics_tracker.compute_valid_neighbor_fraction(weights)
+                                    )
+                                    (
+                                        attention_mass_window_pct,
+                                        attention_mass_expander_pct,
+                                    ) = metrics_tracker.compute_attention_mass_split(
+                                        weights, window_size
+                                    )
             except (AttributeError, IndexError, TypeError):
                 pass  # Silently skip if path doesn't exist or is wrong type
 
@@ -246,6 +271,9 @@ def train(
                 activation_norm=activation_norm,
                 attention_entropy=attention_entropy,
                 attention_entropy_normalized=attention_entropy_normalized,
+                valid_neighbor_fraction=valid_neighbor_fraction,
+                attention_mass_window_pct=attention_mass_window_pct,
+                attention_mass_expander_pct=attention_mass_expander_pct,
             )
             logger.log({"type": "window", **metrics_to_dict(window_metrics)})
 

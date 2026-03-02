@@ -270,9 +270,9 @@ All tests pass with 100% coverage of sparse attention code.
 ## Conclusion
 
 OrionSparseAttention is a **correct, efficient sparse attention implementation** that:
-- ✅ Combines window + expander for stable, long-range modeling
-- ✅ Reduces complexity from O(T²) to O(T·(W+d))
-- ✅ Respects causality, padding, and segment boundaries
-- ✅ Provides per-head variation for diverse patterns
-- ✅ Handles edge cases robustly
-- ✅ Fully tested and production-ready
+- Combines window + expander for stable, long-range modeling
+- Reduces complexity from O(T²) to O(T·(W+d))
+- Respects causality, padding, and segment boundaries
+- Provides per-head variation for diverse patterns
+- Handles edge cases robustly
+- Fully tested and production-ready
