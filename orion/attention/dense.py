@@ -15,6 +15,8 @@ class DenseAttention:
     def __init__(self, cfg: AttentionConfig):
         self.cfg = cfg
         self.last_attn_weights: torch.Tensor | None = None  # Store for metrics
+        self.last_attn_entropy: float = 0.0
+        self.last_attn_entropy_normalized: float = 0.0
         self.causal_mask_cache: dict[tuple, torch.Tensor] = {}  # Cache causal masks
 
     def forward(
@@ -63,7 +65,34 @@ class DenseAttention:
         # Store for metrics (detached to avoid graph retention)
         self.last_attn_weights = attn_weights.detach()
 
+        # Compute and store attention metrics
+        self._compute_attention_metrics(attn_weights.detach())
+
         # Aggregate values: [B, H, T, Dh]
         output = torch.einsum("bhts,bhsd->bhtd", attn_weights, v)
 
         return output
+
+    def _compute_attention_metrics(self, attn_weights: torch.Tensor) -> None:
+        """Compute and store attention metrics from weights.
+
+        Args:
+            attn_weights: [B, H, T, T] attention weights (detached)
+        """
+        import math
+
+        if attn_weights.numel() == 0:
+            self.last_attn_entropy = 0.0
+            self.last_attn_entropy_normalized = 0.0
+            return
+
+        degree = attn_weights.shape[-1]
+
+        # Entropy: -sum(p * log(p))
+        attn_weights_safe = torch.clamp(attn_weights, min=1e-10)
+        entropy = -(attn_weights * torch.log(attn_weights_safe)).sum(dim=-1).mean().item()
+        max_entropy = math.log(degree) if degree > 1 else 1.0
+        entropy_normalized = entropy / max_entropy if max_entropy > 0 else 0.0
+
+        self.last_attn_entropy = entropy
+        self.last_attn_entropy_normalized = entropy_normalized

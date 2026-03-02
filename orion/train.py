@@ -206,19 +206,13 @@ def train(
             r = residual.detach()
             activation_norm = float(torch.sqrt((r.float() ** 2).mean()).item())
 
-            # Compute attention entropy if using sparse or dense attention
-            # Note: Attention entropy is available for SparseAttention and DenseAttention models.
-            # For TinyDecoderOnly (which uses nn.TransformerEncoderLayer with nn.MultiheadAttention),
-            # entropy will be 0.0 since nn.MultiheadAttention can return weights, but
-            # nn.TransformerEncoderLayer/Encoder doesn't provide a clean way to retrieve them
-            # externally without modifying/replacing modules or using hooks.
+            # Get attention metrics from the first layer's attention backend
             attention_entropy = 0.0
             attention_entropy_normalized = 0.0
             valid_neighbor_fraction = 0.0
             attention_mass_window_pct = 0.0
             attention_mass_expander_pct = 0.0
 
-            # Try to get attention weights from the first layer's attention backend
             try:
                 from .attention.dense import DenseAttention
                 from .attention.sparse import SparseAttention
@@ -236,33 +230,24 @@ def train(
                     )
                     if attn_backend is not None:
                         attn_backend = getattr(attn_backend, "attn_backend", attn_backend)
-                        if isinstance(attn_backend, (DenseAttention, SparseAttention)) and hasattr(
-                            attn_backend, "last_attn_weights"
-                        ):
-                            weights = attn_backend.last_attn_weights
-                            if weights is not None:
-                                # For dense attention, use full sequence length as degree
-                                if isinstance(attn_backend, DenseAttention):
-                                    degree = weights.shape[-1]  # T (full sequence)
-                                else:  # SparseAttention
-                                    degree = window_size + expander_degree
-                                entropy, entropy_norm = metrics_tracker.compute_attention_entropy(
-                                    weights, degree
-                                )
-                                attention_entropy = entropy
-                                attention_entropy_normalized = entropy_norm
+                        if isinstance(attn_backend, (DenseAttention, SparseAttention)):
+                            # Read pre-computed metrics from backend
+                            attention_entropy = getattr(attn_backend, "last_attn_entropy", 0.0)
+                            attention_entropy_normalized = getattr(
+                                attn_backend, "last_attn_entropy_normalized", 0.0
+                            )
 
-                                # Compute sparse-specific metrics
-                                if isinstance(attn_backend, SparseAttention):
-                                    valid_neighbor_fraction = (
-                                        metrics_tracker.compute_valid_neighbor_fraction(weights)
-                                    )
-                                    (
-                                        attention_mass_window_pct,
-                                        attention_mass_expander_pct,
-                                    ) = metrics_tracker.compute_attention_mass_split(
-                                        weights, window_size
-                                    )
+                            # Sparse-specific metrics
+                            if isinstance(attn_backend, SparseAttention):
+                                valid_neighbor_fraction = getattr(
+                                    attn_backend, "last_valid_neighbor_fraction", 0.0
+                                )
+                                attention_mass_window_pct = getattr(
+                                    attn_backend, "last_attention_mass_window_pct", 0.0
+                                )
+                                attention_mass_expander_pct = getattr(
+                                    attn_backend, "last_attention_mass_expander_pct", 0.0
+                                )
             except (AttributeError, IndexError, TypeError):
                 pass  # Silently skip if path doesn't exist or is wrong type
 
