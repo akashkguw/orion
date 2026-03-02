@@ -191,7 +191,8 @@ def train(
             print(
                 f"Step {step}: loss={step_metrics.loss:.4f}, ppl={step_metrics.ppl:.2f}, "
                 f"throughput={throughput:.1f} tok/s, grad_norm={grad_norm:.4f}, "
-                f"clipped={step_metrics.grad_clipped}"
+                f"clipped={step_metrics.grad_clipped}, step_time={step_time_ms:.2f}ms, "
+                f"acc={accuracy_top1:.4f}, lr={learning_rate:.2e}"
             )
 
         # Record window metrics every 50 steps
@@ -276,6 +277,21 @@ def train(
                 attention_mass_expander_pct=attention_mass_expander_pct,
             )
             logger.log({"type": "window", **metrics_to_dict(window_metrics)})
+
+            # Print window metrics summary
+            print(
+                f"  Window {step}: vram={vram_peak_mib}MB, "
+                f"div_rate={window_metrics.divergence_rate:.3f}, "
+                f"act_norm={activation_norm:.4f}, "
+                f"attn_ent={attention_entropy:.4f} (norm={attention_entropy_normalized:.4f}), "
+                f"clip_rate={window_metrics.clip_rate:.3f}"
+            )
+            if valid_neighbor_fraction > 0:
+                print(
+                    f"    Sparse: valid_neighbors={valid_neighbor_fraction:.3f}, "
+                    f"window_mass={attention_mass_window_pct:.1f}%, "
+                    f"expander_mass={attention_mass_expander_pct:.1f}%"
+                )
 
         # Save checkpoint before eval
         if step % save_every == 0 or step % 1000 == 0:
