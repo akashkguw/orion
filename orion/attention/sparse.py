@@ -111,6 +111,11 @@ class SparseAttention:
         self.expander_degree = cfg.expander_degree or 8
         self.indices_cache: dict[tuple, torch.Tensor] = {}
         self.last_attn_weights: torch.Tensor | None = None  # Store for metrics
+        self.last_attn_entropy: float = 0.0
+        self.last_attn_entropy_normalized: float = 0.0
+        self.last_valid_neighbor_fraction: float = 0.0
+        self.last_attention_mass_window_pct: float = 0.0
+        self.last_attention_mass_expander_pct: float = 0.0
 
     def _get_indices(self, n: int, h: int, device: torch.device | str) -> torch.Tensor:
         """Get or build sparse indices for a given sequence length and head.
@@ -209,6 +214,9 @@ class SparseAttention:
 
         # Store for metrics (detached to avoid graph retention)
         self.last_attn_weights = attn_weights.detach()
+
+        # Compute and store sparse attention metrics
+        self._compute_attention_metrics(attn_weights.detach())
 
         # Aggregate values: [B, H, T, Dh]
         output = torch.einsum("bhtp,bhtpd->bhtd", attn_weights, v_sparse)
@@ -319,3 +327,47 @@ class SparseAttention:
         key_ok_neighbors = torch.gather(mask4, 3, idx4)  # [B, H, T, degree]
 
         return scores.masked_fill(~key_ok_neighbors, float("-inf"))
+
+    def _compute_attention_metrics(self, attn_weights: torch.Tensor) -> None:
+        """Compute and store attention metrics from weights.
+
+        Args:
+            attn_weights: [B, H, T, degree] attention weights (detached)
+        """
+        import math
+
+        if attn_weights.numel() == 0:
+            self.last_attn_entropy = 0.0
+            self.last_attn_entropy_normalized = 0.0
+            self.last_valid_neighbor_fraction = 0.0
+            self.last_attention_mass_window_pct = 0.0
+            self.last_attention_mass_expander_pct = 0.0
+            return
+
+        degree = attn_weights.shape[-1]
+
+        # Entropy: -sum(p * log(p))
+        attn_weights_safe = torch.clamp(attn_weights, min=1e-10)
+        entropy = -(attn_weights * torch.log(attn_weights_safe)).sum(dim=-1).mean().item()
+        max_entropy = math.log(degree) if degree > 1 else 1.0
+        entropy_normalized = entropy / max_entropy if max_entropy > 0 else 0.0
+
+        # Valid neighbor fraction: effective_degree / degree
+        eff_degree = (attn_weights > 0).sum(dim=-1).float().mean().item()
+        valid_neighbor_fraction = eff_degree / degree if degree > 0 else 0.0
+
+        # Attention mass split: window vs expander
+        window_mass = attn_weights[..., : self.window_size].sum(dim=-1).mean().item()
+        expander_mass = attn_weights[..., self.window_size :].sum(dim=-1).mean().item()
+        total = window_mass + expander_mass
+        if total > 0:
+            window_pct = 100.0 * window_mass / total
+            expander_pct = 100.0 * expander_mass / total
+        else:
+            window_pct = expander_pct = 0.0
+
+        self.last_attn_entropy = entropy
+        self.last_attn_entropy_normalized = entropy_normalized
+        self.last_valid_neighbor_fraction = valid_neighbor_fraction
+        self.last_attention_mass_window_pct = window_pct
+        self.last_attention_mass_expander_pct = expander_pct
