@@ -18,7 +18,12 @@ class DenseAttention:
         self.causal_mask_cache: dict[tuple, torch.Tensor] = {}  # Cache causal masks
 
     def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *, attn_mask=None
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        *,
+        attn_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # Compute attention manually to capture weights for metrics
         # q, k, v: [B, H, T, Dh]
