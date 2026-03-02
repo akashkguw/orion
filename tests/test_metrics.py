@@ -37,24 +37,24 @@ class TestMetricsTracker:
         assert throughput == 0.0
 
     def test_compute_grad_norm_pre_clip(self):
-        """Test gradient norm computation."""
-        tracker = MetricsTracker()
+        """Test gradient norm computation using clip_grad_norm_."""
         model = TinyDecoderOnly(vocab_size=256, d_model=64, n_layers=2, n_heads=4, mlp_mult=4)
 
         # Create dummy gradients
         for p in model.parameters():
             p.grad = torch.ones_like(p)
 
-        grad_norm = tracker.compute_grad_norm_pre_clip(model)
+        # Compute norm using clip_grad_norm_ (which returns pre-clip norm)
+        grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0))
         assert grad_norm > 0.0
         assert isinstance(grad_norm, float)
 
     def test_compute_grad_norm_no_gradients(self):
         """Test gradient norm with no gradients."""
-        tracker = MetricsTracker()
         model = TinyDecoderOnly(vocab_size=256, d_model=64, n_layers=2, n_heads=4, mlp_mult=4)
 
-        grad_norm = tracker.compute_grad_norm_pre_clip(model)
+        # With no gradients, clip_grad_norm_ returns 0.0
+        grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0))
         assert grad_norm == 0.0
 
     def test_check_divergence_nan_loss(self):
@@ -136,18 +136,15 @@ class TestMetricsTracker:
         metrics = tracker.record_step_metrics(
             step=1,
             loss=5.0,
-            grad_norm_pre_clip=1.5,
-            grad_norm_post_clip=1.0,
+            grad_norm=1.5,
             throughput=1000.0,
         )
 
         assert isinstance(metrics, StepMetrics)
         assert metrics.step == 1
         assert metrics.loss == 5.0
-        assert metrics.nll == 5.0
         assert metrics.ppl == pytest.approx(math.exp(5.0), rel=1e-5)
-        assert metrics.grad_norm_pre_clip == 1.5
-        assert metrics.grad_norm_post_clip == 1.0
+        assert metrics.grad_norm == 1.5
         assert metrics.grad_clipped is True
         assert metrics.diverged is False
 
@@ -157,8 +154,7 @@ class TestMetricsTracker:
         metrics = tracker.record_step_metrics(
             step=1,
             loss=5.0,
-            grad_norm_pre_clip=0.5,
-            grad_norm_post_clip=0.5,
+            grad_norm=0.5,
             throughput=1000.0,
         )
 
@@ -170,8 +166,7 @@ class TestMetricsTracker:
         metrics = tracker.record_step_metrics(
             step=1,
             loss=float("nan"),
-            grad_norm_pre_clip=1.0,
-            grad_norm_post_clip=1.0,
+            grad_norm=1.0,
             throughput=1000.0,
         )
 
@@ -186,8 +181,7 @@ class TestMetricsTracker:
             tracker.record_step_metrics(
                 step=i + 1,
                 loss=5.0,
-                grad_norm_pre_clip=1.0,
-                grad_norm_post_clip=1.0,
+                grad_norm=1.0,
                 throughput=1000.0,
             )
 
@@ -217,8 +211,7 @@ class TestMetricsTracker:
             tracker.record_step_metrics(
                 step=i + 1,
                 loss=loss,
-                grad_norm_pre_clip=1.0,
-                grad_norm_post_clip=1.0,
+                grad_norm=1.0,
                 throughput=1000.0,
             )
 
@@ -280,11 +273,9 @@ class TestMetricsDataclasses:
         metrics = StepMetrics(
             step=1,
             loss=5.0,
-            nll=5.0,
             ppl=148.4,
             throughput_tokens_per_sec=1000.0,
-            grad_norm_pre_clip=1.5,
-            grad_norm_post_clip=1.0,
+            grad_norm=1.5,
             grad_clipped=True,
             diverged=False,
         )
@@ -292,7 +283,6 @@ class TestMetricsDataclasses:
         d = metrics_to_dict(metrics)
         assert d["step"] == 1
         assert d["loss"] == 5.0
-        assert d["nll"] == 5.0
         assert d["ppl"] == pytest.approx(148.4, rel=1e-5)
         assert d["grad_clipped"] is True
         assert d["diverged"] is False
@@ -359,8 +349,7 @@ class TestMetricsLogging:
             metrics = tracker.record_step_metrics(
                 step=1,
                 loss=5.0,
-                grad_norm_pre_clip=1.5,
-                grad_norm_post_clip=1.0,
+                grad_norm=1.5,
                 throughput=1000.0,
             )
             logger.log({"type": "step", **metrics_to_dict(metrics)})
@@ -372,10 +361,9 @@ class TestMetricsLogging:
             assert obj["type"] == "step"
             assert obj["step"] == 1
             assert obj["loss"] == 5.0
-            assert obj["nll"] == 5.0
             assert "ppl" in obj
-            assert "grad_norm_pre_clip" in obj
-            assert "grad_norm_post_clip" in obj
+            assert "grad_norm" in obj
+            assert "grad_clipped" in obj
 
     def test_window_metrics_logging(self):
         """Test logging window metrics to JSONL."""
@@ -418,8 +406,7 @@ class TestMetricsLogging:
                 metrics = tracker.record_step_metrics(
                     step=step,
                     loss=5.0,
-                    grad_norm_pre_clip=1.0,
-                    grad_norm_post_clip=1.0,
+                    grad_norm=1.0,
                     throughput=1000.0,
                 )
                 logger.log({"type": "step", **metrics_to_dict(metrics)})

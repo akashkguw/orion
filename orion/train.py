@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import os
 import time
 from pathlib import Path
@@ -117,6 +116,10 @@ def train(
     logger = JsonlLogger(metrics_path, wall_time_offset=wall_time_offset)
     metrics_tracker = MetricsTracker(window_size=50)
 
+    # Reset VRAM stats after model init to avoid counting initialization allocations
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats()
+
     def compute_epoch(step: int) -> int:
         if steps_per_epoch:
             return (step - 1) // steps_per_epoch + 1
@@ -131,23 +134,31 @@ def train(
     if start_step >= steps:
         return
 
+    # Log run metrics once at start (only on first training, not on resume)
+    if start_step == 0:
+        run_metrics = metrics_tracker.record_run_metrics(
+            step=0,
+            window_size=window_size,
+            expander_degree=expander_degree,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            n_layers=n_layers,
+            n_heads=n_heads,
+        )
+        logger.log({"type": "run", **metrics_to_dict(run_metrics)})
+
     for step in range(start_step + 1, steps + 1):
         step_time_start = time.time()
 
         x, y = get_batch("train")
-        logits = model(x)
+        logits, residual = model(x, return_residual=True)
         loss = loss_fn(logits, y)
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
 
-        # Compute gradient norm before clipping
-        grad_norm_pre_clip = metrics_tracker.compute_grad_norm_pre_clip(model)
-
-        # Clip gradients and get post-clip norm
-        grad_norm_post_clip = float(
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        )
+        # Compute gradient norm (pre-clip)
+        grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0))
 
         opt.step()
         if scheduler is not None:
@@ -160,8 +171,7 @@ def train(
         step_metrics = metrics_tracker.record_step_metrics(
             step=step,
             loss=float(loss.item()),
-            grad_norm_pre_clip=grad_norm_pre_clip,
-            grad_norm_post_clip=grad_norm_post_clip,
+            grad_norm=grad_norm,
             throughput=throughput,
         )
         logger.log({"type": "step", **metrics_to_dict(step_metrics)})
@@ -170,8 +180,8 @@ def train(
         if step % log_every == 0:
             print(
                 f"Step {step}: loss={step_metrics.loss:.4f}, ppl={step_metrics.ppl:.2f}, "
-                f"throughput={throughput:.1f} tok/s, grad_norm_pre={grad_norm_pre_clip:.4f}, "
-                f"grad_norm_post={grad_norm_post_clip:.4f}"
+                f"throughput={throughput:.1f} tok/s, grad_norm={grad_norm:.4f}, "
+                f"clipped={step_metrics.grad_clipped}"
             )
 
         # Record window metrics every 50 steps
@@ -181,21 +191,54 @@ def train(
                 vram_peak_mib = int(torch.cuda.max_memory_allocated() / (1024 * 1024))
                 torch.cuda.reset_peak_memory_stats()
 
-            # Compute activation norm from last forward pass output
-            # For now, use a dummy value (would need to capture from model)
-            activation_norm = 0.0
+            # Compute activation norm from residual stream (detached to avoid graph retention)
+            r = residual.detach()
+            activation_norm = float(torch.sqrt((r.float() ** 2).mean()).item())
 
-            # Compute attention entropy if using sparse attention
+            # Compute attention entropy if using sparse or dense attention
+            # Note: Attention entropy is available for SparseAttention and DenseAttention models.
+            # For TinyDecoderOnly (which uses nn.TransformerEncoderLayer with nn.MultiheadAttention),
+            # entropy will be 0.0 since nn.MultiheadAttention can return weights, but
+            # nn.TransformerEncoderLayer/Encoder doesn't provide a clean way to retrieve them
+            # externally without modifying/replacing modules or using hooks.
             attention_entropy = 0.0
             attention_entropy_normalized = 0.0
-            if "sparse" in str(cfg.get("model", "attention_type", default="dense")).lower():
-                # This would require capturing attention weights during forward pass
-                # For now, use placeholder
-                degree = window_size + expander_degree
-                attention_entropy = 1.5  # Placeholder
-                attention_entropy_normalized = attention_entropy / (
-                    math.log(degree) if degree > 1 else 1.0
-                )
+
+            # Try to get attention weights from the first layer's attention backend
+            try:
+                from .attention.dense import DenseAttention
+                from .attention.sparse import SparseAttention
+
+                # Handle both OrionDecoder (ModuleList) and TinyDecoderOnly (TransformerEncoder)
+                first_block = None
+                if hasattr(model.blocks, "__getitem__"):  # ModuleList
+                    first_block = model.blocks[0]
+                elif hasattr(model.blocks, "layers"):  # TransformerEncoder
+                    first_block = model.blocks.layers[0]
+
+                if first_block is not None:
+                    attn_backend = getattr(first_block, "attn", None) or getattr(
+                        first_block, "self_attn", None
+                    )
+                    if attn_backend is not None:
+                        attn_backend = getattr(attn_backend, "attn_backend", attn_backend)
+                        if isinstance(attn_backend, (DenseAttention, SparseAttention)) and hasattr(
+                            attn_backend, "last_attn_weights"
+                        ):
+                            weights = attn_backend.last_attn_weights
+                            if weights is not None:
+                                # For dense attention, use full sequence length as degree
+                                if isinstance(attn_backend, DenseAttention):
+                                    degree = weights.shape[-1]  # T (full sequence)
+                                else:  # SparseAttention
+                                    degree = window_size + expander_degree
+                                entropy, entropy_norm = metrics_tracker.compute_attention_entropy(
+                                    weights, degree
+                                )
+                                attention_entropy = entropy
+                                attention_entropy_normalized = entropy_norm
+            except (AttributeError, IndexError, TypeError):
+                pass  # Silently skip if path doesn't exist or is wrong type
 
             window_metrics = metrics_tracker.record_window_metrics(
                 step=step,
@@ -206,7 +249,8 @@ def train(
             )
             logger.log({"type": "window", **metrics_to_dict(window_metrics)})
 
-        if step % save_every == 0:
+        # Save checkpoint before eval
+        if step % save_every == 0 or step % 1000 == 0:
             save_checkpoint(
                 out_dir / "checkpoint.pt",
                 model=model,
@@ -217,6 +261,22 @@ def train(
                 seed=seed,
                 cfg=cfg,
             )
+
+        # Evaluate at long context lengths every 1000 steps (after checkpoint save)
+        if step % 1000 == 0:
+            from .eval import evaluate_long_context
+
+            eval_results = evaluate_long_context(
+                cfg, checkpoint=str(out_dir / "checkpoint.pt"), device=device
+            )
+            eval_metrics = metrics_tracker.record_eval_metrics(
+                step=step,
+                eval_ppl_512=eval_results.get("eval_ppl_512", 0.0),
+                eval_ppl_1024=eval_results.get("eval_ppl_1024", 0.0),
+                eval_ppl_2048=eval_results.get("eval_ppl_2048", 0.0),
+                eval_ppl_4096=eval_results.get("eval_ppl_4096", 0.0),
+            )
+            logger.log({"type": "eval", **metrics_to_dict(eval_metrics)})
 
     # Always save last
     save_checkpoint(

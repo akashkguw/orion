@@ -45,6 +45,58 @@ def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict
 
 
 @torch.no_grad()
+def evaluate_long_context(
+    cfg: OrionConfig, *, checkpoint: str, device: torch.device
+) -> dict[str, float]:
+    """Evaluate model at multiple context lengths (512, 1024, 2048, 4096).
+
+    Args:
+        cfg: Configuration
+        checkpoint: Path to checkpoint
+        device: Device to evaluate on
+
+    Returns:
+        Dictionary with eval_ppl_512, eval_ppl_1024, eval_ppl_2048, eval_ppl_4096
+    """
+    vocab_size = int(cfg.get("data", "vocab_size", default=256))
+    batch_size = int(cfg.get("data", "batch_size", default=8))
+
+    d_model = int(cfg.get("model", "d_model", default=128))
+    n_layers = int(cfg.get("model", "n_layers", default=2))
+    n_heads = int(cfg.get("model", "n_heads", default=4))
+    mlp_mult = int(cfg.get("model", "mlp_mult", default=4))
+
+    model_name = str(cfg.get("model", "name", default="tiny"))
+    attention_cfg = cfg.attention_config()
+
+    model = build_model(
+        name=model_name,
+        vocab_size=vocab_size,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        mlp_mult=mlp_mult,
+        device=device,
+        attention_cfg=attention_cfg,
+    )
+
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["model"], strict=True)
+    model.eval()
+
+    results = {}
+    for context_len in [512, 1024, 2048, 4096]:
+        x = torch.randint(0, vocab_size, (batch_size, context_len), device=device)
+        y = torch.roll(x, shifts=-1, dims=1)
+        logits = model(x)
+        loss = loss_fn(logits, y)
+        ppl = float(torch.exp(loss).clamp(max=1e6).item())
+        results[f"eval_ppl_{context_len}"] = ppl
+
+    return results
+
+
+@torch.no_grad()
 def main():
     import argparse
 

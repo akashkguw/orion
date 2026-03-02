@@ -14,11 +14,9 @@ class StepMetrics:
 
     step: int
     loss: float
-    nll: float  # Negative log likelihood (same as loss if no label smoothing)
     ppl: float
     throughput_tokens_per_sec: float
-    grad_norm_pre_clip: float
-    grad_norm_post_clip: float
+    grad_norm: float
     grad_clipped: bool
     diverged: bool = False
 
@@ -83,21 +81,6 @@ class MetricsTracker:
         tokens_this_step = batch_size * seq_len
         return tokens_this_step / step_time_sec
 
-    def compute_grad_norm_pre_clip(self, model: torch.nn.Module) -> float:
-        """Compute global gradient norm before clipping.
-
-        Args:
-            model: Model to compute grad norm for
-
-        Returns:
-            Gradient norm before clipping
-        """
-        total_norm = 0.0
-        for p in model.parameters():
-            if p.grad is not None:
-                total_norm += p.grad.data.norm(2).item() ** 2
-        return math.sqrt(total_norm)
-
     def check_divergence(self, loss: float, grad_norm: float) -> bool:
         """Check if training has diverged.
 
@@ -154,26 +137,23 @@ class MetricsTracker:
         self,
         step: int,
         loss: float,
-        grad_norm_pre_clip: float,
-        grad_norm_post_clip: float,
+        grad_norm: float,
         throughput: float,
     ) -> StepMetrics:
         """Record metrics for a single step.
 
         Args:
             step: Step number
-            loss: Loss value (NLL if no label smoothing)
-            grad_norm_pre_clip: Gradient norm before clipping
-            grad_norm_post_clip: Gradient norm after clipping
+            loss: Loss value (cross-entropy, which equals NLL with no label smoothing)
+            grad_norm: Gradient norm (pre-clip, from clip_grad_norm_)
             throughput: Throughput in tokens/sec
 
         Returns:
             StepMetrics object
         """
-        nll = loss
         ppl = math.exp(min(loss, 100.0))  # Clamp to avoid overflow
-        grad_clipped = grad_norm_pre_clip > 1.0
-        diverged = self.check_divergence(loss, grad_norm_post_clip)
+        grad_clipped = grad_norm > 1.0
+        diverged = self.check_divergence(loss, grad_norm)
 
         if diverged:
             self.diverged_steps.append(1)
@@ -183,11 +163,9 @@ class MetricsTracker:
         return StepMetrics(
             step=step,
             loss=loss,
-            nll=nll,
             ppl=ppl,
             throughput_tokens_per_sec=throughput,
-            grad_norm_pre_clip=grad_norm_pre_clip,
-            grad_norm_post_clip=grad_norm_post_clip,
+            grad_norm=grad_norm,
             grad_clipped=grad_clipped,
             diverged=diverged,
         )

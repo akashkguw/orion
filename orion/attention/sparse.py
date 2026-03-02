@@ -112,6 +112,7 @@ class SparseAttention:
         self.window_size = max(1, cfg.window_size or 64)  # Ensure window_size >= 1
         self.expander_degree = cfg.expander_degree or 8
         self.indices_cache: dict[tuple, torch.Tensor] = {}
+        self.last_attn_weights: torch.Tensor | None = None  # Store for metrics
 
     def _get_indices(self, n: int, h: int, device: torch.device | str) -> torch.Tensor:
         """Get or build sparse indices for a given sequence length and head.
@@ -207,6 +208,9 @@ class SparseAttention:
         # Softmax over neighbors
         attn_weights = F.softmax(scores, dim=-1)
         attn_weights = torch.nan_to_num(attn_weights, 0.0)
+
+        # Store for metrics (detached to avoid graph retention)
+        self.last_attn_weights = attn_weights.detach()
 
         # Aggregate values: [B, H, T, Dh]
         output = torch.einsum("bhtp,bhtpd->bhtd", attn_weights, v_sparse)

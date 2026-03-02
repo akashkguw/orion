@@ -4,9 +4,11 @@ A research framework for long-context, decoder-only Transformers with **structur
 
 **Key Features:**
 - Sparse Attention - O(T*(W+d)) complexity vs O(T^2) for dense (7x faster on 512 tokens)
+- Dense & Sparse Backends - Train with dense, sparse, or window attention
+- Real Metrics - Activation norm, attention entropy, long-context eval
 - Reproducible - Deterministic training with seed control and checkpoint management
 - Configurable - YAML-based configs for easy experimentation
-- Well-tested - 82+ tests covering all components
+- Well-tested - 114 tests covering all components
 - Benchmarked - Configs for 256-4K context lengths
 
 **Table of Contents**
@@ -441,18 +443,21 @@ make smoke
 
 ### Test Coverage
 
-**82+ tests** across 10 test files:
+**114 tests** across 11 test files:
 
 | Category | Tests | Coverage |
 |----------|-------|----------|
 | Sparse Attention | 21 | Index generation, forward pass, masking, edge cases |
 | Model | 8 | Forward pass, loss computation, device handling |
+| Model Combinations | 4 | All model/attention backends (tiny, orion+dense/sparse/window) |
 | Config | 6 | YAML loading, hierarchical access, validation |
 | Data | 3 | Tokenizer, encoding, roundtrip |
 | Causal Mask | 6 | Mask patterns, causality, variable lengths |
 | Checkpoint | 4 | Save/load, metadata, device transfer |
 | Logging | 10 | JSONL format, field validation |
+| Metrics | 28 | Step/window/eval/run metrics, entropy, activation norm |
 | CLI | 4 | Command parsing, argument handling |
+| Orion Decoder | 10 | Decoder-specific tests |
 
 ---
 
@@ -467,13 +472,99 @@ make dev
 ### Common Commands
 
 ```bash
-make lint          # Run linter (ruff)
-make format        # Auto-format code
+# Training
+make train         # Full training run (configs/golden.yaml)
+make smoke         # Quick 5-step training test (CPU)
+
+# Code Quality
+make lint          # Run linter (ruff check)
+make format        # Auto-format code (ruff format)
 make format-check  # Check formatting without changes
-make test          # Run all tests
-make smoke         # Quick 5-step training test
-make train         # Full training run
-make eval          # Evaluate checkpoint
+
+# Testing
+make test          # Run all tests (114 tests)
+
+# Evaluation
+make eval          # Evaluate checkpoint (runs/latest/checkpoint.pt)
+```
+
+### Training Examples
+
+**Train with default config:**
+```bash
+python -m orion.train --config configs/golden.yaml
+```
+
+**Train with custom parameters:**
+```bash
+python -m orion.train --config configs/golden.yaml \
+  --save-every 50 \
+  --device cuda
+```
+
+**Resume from checkpoint:**
+```bash
+# Resume from latest
+python -m orion.train --config configs/golden.yaml --resume
+
+# Resume from specific checkpoint
+python -m orion.train --config configs/golden.yaml \
+  --resume runs/exp_shakespeare_dense/checkpoint.pt
+```
+
+**Train different model/attention combinations:**
+```bash
+# Dense attention (baseline)
+python -m orion.train --config configs/exp_dense.yaml
+
+# Sparse attention
+python -m orion.train --config configs/exp_sparse_smoke.yaml
+
+# Window attention
+python -m orion.train --config configs/exp_window_256.yaml
+
+# TinyDecoderOnly (simple baseline)
+python -m orion.train --config configs/tinyshakespeare_dense.yaml
+```
+
+### Evaluation Examples
+
+**Evaluate latest checkpoint:**
+```bash
+python -m orion.eval --config configs/golden.yaml \
+  --checkpoint runs/latest/checkpoint.pt
+```
+
+**Evaluate specific run:**
+```bash
+python -m orion.eval --config configs/exp_sparse_smoke.yaml \
+  --checkpoint runs/exp_sparse_smoke/checkpoint.pt
+```
+
+### Testing
+
+**Run all tests:**
+```bash
+make test
+# Output: 114 passed in 1.5s
+```
+
+**Run specific test file:**
+```bash
+pytest tests/test_sparse_attention.py -v
+pytest tests/test_metrics.py -v
+pytest tests/test_all_models.py -v
+```
+
+**Run with coverage:**
+```bash
+pytest --cov=orion tests/
+```
+
+**Test specific model/attention combinations:**
+```bash
+# Tests all 4 combinations: tiny, orion+dense, orion+sparse, orion+window
+pytest tests/test_all_models.py -v
 ```
 
 ### Code Quality
@@ -481,18 +572,63 @@ make eval          # Evaluate checkpoint
 - **Linter**: Ruff (E, F, I, B, UP rules)
 - **Formatter**: Ruff format
 - **Type Checking**: Full type annotations
-- **Tests**: Pytest with 82+ tests
+- **Tests**: Pytest with 114 tests (110 original + 4 model tests)
 - **Python**: 3.10+ (target 3.11)
 
 ### CI/CD Pipeline
 
-GitHub Actions runs on every PR and push to main:
+**Local CI (before commit):**
+```bash
+make test lint format-check
+# All checks must pass
+```
 
-1. **Lint & Format** - Code quality checks
-2. **Unit Tests** - Full test suite (82+ tests)
+**Full CI output:**
+```
+pytest -q
+114 passed in 1.5s
+
+ruff check .
+All checks passed!
+
+ruff format --check .
+35 files already formatted
+```
+
+**GitHub Actions** runs on every PR and push to main:
+
+1. **Lint & Format** - Code quality checks (ruff)
+2. **Unit Tests** - Full test suite (114 tests)
 3. **Smoke Test** - 5-step training on CPU
 
 All checks must pass before merge.
+
+### Metrics Inspection
+
+**View training metrics:**
+```bash
+# Last 5 steps
+tail -n 5 runs/latest/metrics.jsonl
+
+# Pretty print all metrics
+cat runs/latest/metrics.jsonl | jq .
+
+# View only step metrics
+cat runs/latest/metrics.jsonl | jq 'select(.type == "step")'
+
+# Extract specific field (e.g., loss)
+cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'
+
+# Compare throughput across runs
+paste <(cat runs/exp_dense/metrics.jsonl | jq -r 'select(.type == "step") | .throughput_tokens_per_sec') \
+      <(cat runs/exp_sparse/metrics.jsonl | jq -r 'select(.type == "step") | .throughput_tokens_per_sec')
+```
+
+**Metrics types logged:**
+- `run_metrics` - Once at startup (compute proxy)
+- `step` - Every step (loss, ppl, throughput, grad norm)
+- `window` - Every 50 steps (VRAM, activation norm, attention entropy)
+- `eval` - Every 1000 steps (perplexity at 512/1024/2048/4096 tokens)
 
 ---
 

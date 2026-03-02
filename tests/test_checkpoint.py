@@ -227,7 +227,11 @@ def test_training_resume_deterministic():
             assert torch.allclose(value, resume_ckpt["model"][key])
 
         metrics_lines = (resume_dir / "metrics.jsonl").read_text().splitlines()
-        steps = [json.loads(line)["step"] for line in metrics_lines]
+        steps = [
+            json.loads(line)["step"]
+            for line in metrics_lines
+            if json.loads(line).get("type") != "run"
+        ]
         assert steps == list(range(1, 7))
 
 
