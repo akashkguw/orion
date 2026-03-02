@@ -2,6 +2,8 @@
 
 A research framework for long-context, decoder-only Transformers with **structured sparse attention** (sliding window + expander edges).
 
+Orion combines efficient sparse attention patterns with comprehensive metrics tracking to enable research on long-context language models. It provides multiple attention backends (dense, sparse, window), real-time metrics for model health monitoring, and reproducible training with deterministic checkpointing.
+
 **Key Features:**
 - **Sparse Attention** - O(T·(W+d)) vs O(T²) dense (7x faster on 512 tokens)
 - **Multiple Backends** - Dense, sparse, and window attention
@@ -9,6 +11,10 @@ A research framework for long-context, decoder-only Transformers with **structur
 - **Reproducible** - Deterministic training with seed control
 - **Well-tested** - 136 tests covering all components
 - **Production-ready** - Configs for 256-4K context lengths
+
+**Next Steps:**
+- Norm control (QK-norm, orthogonal init, spectral normalization)
+- Stability improvements for long-context training
 
 **Quick Links:** [Installation](#installation) | [Quick Start](#quick-start) | [Usage](#usage) | [Development](#development)
 
@@ -78,6 +84,15 @@ model:
 | Short sequences (<256) | Dense is simpler |
 
 For details, see [SPARSE_ATTENTION_ARCHITECTURE.md](SPARSE_ATTENTION_ARCHITECTURE.md)
+
+## Norm Control (Next Step)
+
+Planned stability improvements for long-context training:
+- **QK-Norm** - Query-Key normalization for attention stability
+- **Orthogonal Init** - Orthogonal weight initialization
+- **Spectral Normalization** - Spectral norm regularization
+
+These techniques help prevent gradient explosion and improve training stability for very long sequences (4K+ tokens).
 
 ---
 
@@ -220,19 +235,6 @@ pytest tests/test_sparse_attention.py -v  # Specific file
 pytest --cov=orion tests/   # With coverage
 make smoke                  # Quick 5-step test
 ```
-
-**Test Coverage (136 tests):**
-- Sparse Attention (21) - Index generation, forward pass, masking
-- Dense Attention (22) - Causality, masking, caching, gradients
-- Metrics (28) - Step/window/eval metrics, entropy, activation norm
-- Models (12) - Forward pass, device handling, all backends
-- Config (6) - YAML loading, hierarchical access
-- Data (3) - Tokenizer, encoding
-- Causal Mask (6) - Mask patterns, causality
-- Checkpoint (4) - Save/load, metadata
-- Logging (10) - JSONL format, validation
-- CLI (4) - Command parsing
-- Orion Decoder (10) - Decoder-specific tests
 
 ## Development
 
