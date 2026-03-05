@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from orion.train import train
 
 
 @pytest.mark.parametrize(
-    "model_name,attention_type",
+    "model_name,attention_backend",
     [
         ("tiny", None),
         ("orion", "dense"),
@@ -22,7 +23,7 @@ from orion.train import train
         ("orion", "window"),
     ],
 )
-def test_model_attention_combinations(model_name: str, attention_type: str | None) -> None:
+def test_model_attention_combinations(model_name: str, attention_backend: str | None) -> None:
     """Test all model and attention backend combinations."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
@@ -53,10 +54,12 @@ def test_model_attention_combinations(model_name: str, attention_type: str | Non
             "optim": {"lr": 1e-3},
         }
 
-        if attention_type:
-            cfg["model"]["attention_type"] = attention_type
-            cfg["model"]["window_size"] = 8
-            cfg["model"]["expander_degree"] = 2
+        if attention_backend:
+            cfg["attention"] = {
+                "backend": attention_backend,
+                "window_size": 8,
+                "expander_degree": 2,
+            }
 
         cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
 
@@ -71,3 +74,8 @@ def test_model_attention_combinations(model_name: str, attention_type: str | Non
         assert metrics_file.exists()
         lines = metrics_file.read_text().splitlines()
         assert len(lines) > 0
+
+        # First line is run metrics; verify attention degree uses configured values.
+        run_obj = json.loads(lines[0])
+        if attention_backend:
+            assert run_obj["attention_degree"] == 10  # window_size + expander_degree

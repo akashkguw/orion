@@ -9,7 +9,7 @@ Orion combines efficient sparse attention patterns with comprehensive metrics tr
 - **Multiple Backends** - Dense, sparse, and window attention
 - **Real Metrics** - Activation norm, attention entropy, long-context eval
 - **Reproducible** - Deterministic training with seed control
-- **Well-tested** - 136 tests covering all components
+- **Well-tested** - 140 tests covering all components
 - **Production-ready** - Configs for 256-4K context lengths
 
 **Next Steps:**
@@ -25,7 +25,7 @@ Orion combines efficient sparse attention patterns with comprehensive metrics tr
 **Local Setup (5 minutes):**
 ```bash
 git clone https://github.com/akashkguw/orion.git && cd orion
-python3 -m venv .venv && source .venv/bin/activate
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 python -m orion.train --config configs/golden.yaml
 ```
@@ -37,7 +37,7 @@ Click to open: [Orion-Master.ipynb](https://colab.research.google.com/github/aka
 
 ## Installation
 
-**Requirements:** Python 3.10+, PyTorch 2.0+, GPU optional (CUDA 11.8+)
+**Requirements:** Python 3.11+, PyTorch 2.0+, GPU optional (CUDA 11.8+)
 
 **Setup:**
 ```bash
@@ -71,7 +71,10 @@ Query at position 100 attends to:
 **Configuration:**
 ```yaml
 model:
-  attention_type: sparse
+  name: orion
+
+attention:
+  backend: sparse
   window_size: 64        # Local window
   expander_degree: 8     # Long-range neighbors
 ```
@@ -141,7 +144,9 @@ model:
   d_model: 256
   n_layers: 4
   n_heads: 4
-  attention_type: sparse
+
+attention:
+  backend: sparse
   window_size: 64
   expander_degree: 8
 
@@ -191,7 +196,7 @@ orion/
 └── train_utils.py          # Training utilities
 
 configs/                     # Training configurations
-tests/                       # 136 tests (sparse, dense, metrics, models)
+tests/                       # 140 tests (sparse, dense, metrics, models)
 runs/                        # Training outputs (checkpoints, metrics)
 ```
 
@@ -230,7 +235,7 @@ seed = ckpt["seed"]
 
 **Run Tests:**
 ```bash
-make test                   # All 136 tests
+make test                   # All 140 tests
 pytest tests/test_sparse_attention.py -v  # Specific file
 pytest --cov=orion tests/   # With coverage
 make smoke                  # Quick 5-step test
@@ -247,7 +252,7 @@ make dev                    # Install dev dependencies
 ```bash
 make train                  # Full training (configs/golden.yaml)
 make smoke                  # Quick 5-step test
-make test                   # Run all 136 tests
+make test                   # Run all 140 tests
 make lint                   # Lint check (ruff)
 make format                 # Auto-format code
 make format-check           # Check formatting
@@ -281,8 +286,8 @@ cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract 
 - Linter: Ruff (E, F, I, B, UP rules)
 - Formatter: Ruff format
 - Type Checking: Full type annotations
-- Tests: 136 tests (sparse, dense, metrics, models)
-- Python: 3.10+ (target 3.11)
+- Tests: 140 tests (sparse, dense, metrics, models)
+- Python: 3.11+
 
 **CI Pipeline:**
 ```bash
@@ -291,7 +296,7 @@ make test lint format-check  # Local CI (before commit)
 
 GitHub Actions runs on every PR:
 1. Lint & Format checks
-2. Full test suite (136 tests)
+2. Full test suite (140 tests)
 3. Smoke test (5-step training)
 
 ---

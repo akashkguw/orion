@@ -26,12 +26,37 @@ class OrionConfig:
         return d
 
     def attention_config(self) -> AttentionConfig:
-        """Parse the 'attention' section into AttentionConfig. Defaults to dense."""
-        backend = str(self.get("attention", "backend", default="dense"))
-        window = self.get("attention", "window_size")
-        expander = self.get("attention", "expander_degree")
+        """Parse attention config.
+
+        Preferred schema:
+            attention.backend / attention.window_size / attention.expander_degree
+
+        Backward-compatible fallback:
+            model.attention_type / model.window_size / model.expander_degree
+        """
+        attention_section = self.get("attention", default={})
+        model_section = self.get("model", default={})
+        if not isinstance(attention_section, dict):
+            attention_section = {}
+        if not isinstance(model_section, dict):
+            model_section = {}
+
+        backend = attention_section.get("backend")
+        if backend is None:
+            backend = model_section.get("attention_type")
+        if backend is None:
+            backend = "dense"
+
+        window = attention_section.get("window_size")
+        if window is None:
+            window = model_section.get("window_size")
+
+        expander = attention_section.get("expander_degree")
+        if expander is None:
+            expander = model_section.get("expander_degree")
+
         return AttentionConfig(
-            backend=backend,
+            backend=str(backend),
             window_size=int(window) if window is not None else None,
             expander_degree=int(expander) if expander is not None else None,
         )
