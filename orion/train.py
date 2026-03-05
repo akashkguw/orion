@@ -126,8 +126,12 @@ def train(
         return step
 
     # Get attention config for metrics
-    window_size = int(cfg.get("model", "window_size", default=64))
-    expander_degree = int(cfg.get("model", "expander_degree", default=8))
+    window_size = attention_cfg.window_size
+    expander_degree = attention_cfg.expander_degree
+    if window_size is None:
+        window_size = int(cfg.get("model", "window_size", default=64))
+    if expander_degree is None:
+        expander_degree = int(cfg.get("model", "expander_degree", default=8))
 
     # -------- Train loop --------
     model.train()

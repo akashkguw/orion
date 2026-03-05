@@ -7,9 +7,33 @@ from .model import loss_fn
 from .models_factory import build_model
 
 
+def _infer_vocab_size_from_state_dict(state_dict: dict[str, torch.Tensor]) -> int | None:
+    """Infer vocab size from common embedding/head parameters."""
+    for key in ("head.weight", "tok_emb.weight", "tok.weight"):
+        tensor = state_dict.get(key)
+        if isinstance(tensor, torch.Tensor) and tensor.ndim >= 2:
+            return int(tensor.shape[0])
+    return None
+
+
+def _resolve_vocab_size(cfg: OrionConfig, ckpt: dict) -> int:
+    """Prefer checkpoint vocab size to avoid eval-time shape mismatches."""
+    cfg_vocab = cfg.get("data", "vocab_size", default=None)
+    cfg_vocab_size = int(cfg_vocab) if cfg_vocab is not None else None
+
+    model_state = ckpt.get("model")
+    if isinstance(model_state, dict):
+        ckpt_vocab_size = _infer_vocab_size_from_state_dict(model_state)
+        if ckpt_vocab_size is not None:
+            return ckpt_vocab_size
+
+    if cfg_vocab_size is not None:
+        return cfg_vocab_size
+    return 256
+
+
 @torch.no_grad()
 def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict[str, float]:
-    vocab_size = int(cfg.get("data", "vocab_size", default=256))
     seq_len = int(cfg.get("data", "seq_len", default=128))
     batch_size = int(cfg.get("data", "batch_size", default=8))
 
@@ -20,6 +44,8 @@ def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict
 
     model_name = str(cfg.get("model", "name", default="tiny"))
     attention_cfg = cfg.attention_config()
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+    vocab_size = _resolve_vocab_size(cfg, ckpt)
 
     model = build_model(
         name=model_name,
@@ -32,7 +58,6 @@ def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict
         attention_cfg=attention_cfg,
     )
 
-    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model"], strict=True)
     model.eval()
 
@@ -58,7 +83,6 @@ def evaluate_long_context(
     Returns:
         Dictionary with eval_ppl_512, eval_ppl_1024, eval_ppl_2048, eval_ppl_4096
     """
-    vocab_size = int(cfg.get("data", "vocab_size", default=256))
     batch_size = int(cfg.get("data", "batch_size", default=8))
 
     d_model = int(cfg.get("model", "d_model", default=128))
@@ -68,6 +92,8 @@ def evaluate_long_context(
 
     model_name = str(cfg.get("model", "name", default="tiny"))
     attention_cfg = cfg.attention_config()
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+    vocab_size = _resolve_vocab_size(cfg, ckpt)
 
     model = build_model(
         name=model_name,
@@ -80,7 +106,6 @@ def evaluate_long_context(
         attention_cfg=attention_cfg,
     )
 
-    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model"], strict=True)
     model.eval()
 
