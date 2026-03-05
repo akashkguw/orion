@@ -9,7 +9,7 @@ Orion combines efficient sparse attention patterns with comprehensive metrics tr
 - **Multiple Backends** - Dense, sparse, and window attention
 - **Real Metrics** - Activation norm, attention entropy, long-context eval
 - **Reproducible** - Deterministic training with seed control
-- **Well-tested** - 140 tests covering all components
+- **Well-tested** - 144 tests covering all components
 - **Production-ready** - Configs for 256-4K context lengths
 
 **Next Steps:**
@@ -196,7 +196,7 @@ orion/
 └── train_utils.py          # Training utilities
 
 configs/                     # Training configurations
-tests/                       # 140 tests (sparse, dense, metrics, models)
+tests/                       # 144 tests (sparse, dense, metrics, models)
 runs/                        # Training outputs (checkpoints, metrics)
 ```
 
@@ -235,7 +235,7 @@ seed = ckpt["seed"]
 
 **Run Tests:**
 ```bash
-make test                   # All 140 tests
+make test                   # All 144 tests
 pytest tests/test_sparse_attention.py -v  # Specific file
 pytest --cov=orion tests/   # With coverage
 make smoke                  # Quick 5-step test
@@ -252,7 +252,7 @@ make dev                    # Install dev dependencies
 ```bash
 make train                  # Full training (configs/golden.yaml)
 make smoke                  # Quick 5-step test
-make test                   # Run all 140 tests
+make test                   # Run all 144 tests
 make lint                   # Lint check (ruff)
 make format                 # Auto-format code
 make format-check           # Check formatting
@@ -286,7 +286,7 @@ cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract 
 - Linter: Ruff (E, F, I, B, UP rules)
 - Formatter: Ruff format
 - Type Checking: Full type annotations
-- Tests: 140 tests (sparse, dense, metrics, models)
+- Tests: 144 tests (sparse, dense, metrics, models)
 - Python: 3.11+
 
 **CI Pipeline:**
@@ -296,7 +296,7 @@ make test lint format-check  # Local CI (before commit)
 
 GitHub Actions runs on every PR:
 1. Lint & Format checks
-2. Full test suite (140 tests)
+2. Full test suite (144 tests)
 3. Smoke test (5-step training)
 
 ---

@@ -21,6 +21,24 @@ from .train_utils import (
 )
 
 
+def _find_attention_backends(model: torch.nn.Module):
+    """Return first sparse and dense attention backends attached to decoder blocks."""
+    from .attention.dense import DenseAttention
+    from .attention.sparse import SparseAttention
+
+    sparse_backend = None
+    dense_backend = None
+    for module in model.modules():
+        backend = getattr(module, "attn", None)
+        if sparse_backend is None and isinstance(backend, SparseAttention):
+            sparse_backend = backend
+        if dense_backend is None and isinstance(backend, DenseAttention):
+            dense_backend = backend
+        if sparse_backend is not None and dense_backend is not None:
+            break
+    return sparse_backend, dense_backend
+
+
 def train(
     cfg: OrionConfig,
     *,
@@ -218,32 +236,10 @@ def train(
             attention_mass_expander_pct = 0.0
 
             try:
-                from .attention.dense import DenseAttention
-                from .attention.sparse import SparseAttention
-
-                # Find first SparseAttention module anywhere in model (robust approach)
-                sparse_backend = next(
-                    (m for m in model.modules() if isinstance(m, SparseAttention)), None
-                )
-                dense_backend = next(
-                    (m for m in model.modules() if isinstance(m, DenseAttention)), None
-                )
-
-                # Debug: print backend info once per window
-                if step == 50:
-                    print(f"DEBUG: sparse_backend found = {sparse_backend is not None}")
-                    print(f"DEBUG: dense_backend found = {dense_backend is not None}")
+                sparse_backend, dense_backend = _find_attention_backends(model)
 
                 # Try sparse first
                 if sparse_backend is not None:
-                    w = sparse_backend.last_attn_weights
-                    print(f"DEBUG: sparse weights None = {w is None}")
-                    if w is not None:
-                        print(
-                            f"DEBUG: sparse weights shape = {tuple(w.shape)}, "
-                            f"sum = {float(w.sum().item()):.1f}, "
-                            f"max = {float(w.max().item()):.4f}"
-                        )
                     attention_entropy = getattr(sparse_backend, "last_attn_entropy", 0.0)
                     attention_entropy_normalized = getattr(
                         sparse_backend, "last_attn_entropy_normalized", 0.0
@@ -257,29 +253,14 @@ def train(
                     attention_mass_expander_pct = getattr(
                         sparse_backend, "last_attention_mass_expander_pct", 0.0
                     )
-                    if step == 50:
-                        print(
-                            f"DEBUG: sparse entropy = {attention_entropy:.6f}, "
-                            f"valid_neighbors = {valid_neighbor_fraction:.4f}"
-                        )
                 # Fall back to dense
                 elif dense_backend is not None:
-                    w = dense_backend.last_attn_weights
-                    print(f"DEBUG: dense weights None = {w is None}")
-                    if w is not None:
-                        print(
-                            f"DEBUG: dense weights shape = {tuple(w.shape)}, "
-                            f"sum = {float(w.sum().item()):.1f}, "
-                            f"max = {float(w.max().item()):.4f}"
-                        )
                     attention_entropy = getattr(dense_backend, "last_attn_entropy", 0.0)
                     attention_entropy_normalized = getattr(
                         dense_backend, "last_attn_entropy_normalized", 0.0
                     )
-                    if step == 50:
-                        print(f"DEBUG: dense entropy = {attention_entropy:.6f}")
             except (AttributeError, IndexError, TypeError) as e:
-                print(f"DEBUG: Exception in metrics reading: {type(e).__name__}: {e}")
+                print(f"Warning: exception in attention metrics reading: {type(e).__name__}: {e}")
 
             window_metrics = metrics_tracker.record_window_metrics(
                 step=step,
