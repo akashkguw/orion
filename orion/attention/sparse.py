@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import warnings
+
 import torch
 import torch.nn.functional as F
 
 from .base import AttentionConfig
+
+try:
+    from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+    _FLEX_ATTENTION_AVAILABLE = True
+except ImportError:
+    create_block_mask = None
+    flex_attention = None
+    _FLEX_ATTENTION_AVAILABLE = False
 
 
 def build_sparse_indices(
@@ -105,7 +116,12 @@ class SparseAttention:
         self.cfg = cfg
         self.window_size = max(1, cfg.window_size or 64)  # Ensure window_size >= 1
         self.expander_degree = cfg.expander_degree or 8
+        self.sparse_impl = (cfg.sparse_impl or "auto").lower()
+        self.sparse_block_size = max(16, int(cfg.sparse_block_size or 128))
         self.indices_cache: dict[tuple, torch.Tensor] = {}
+        self.block_mask_cache: dict[tuple, torch.Tensor] = {}
+        self._fused_attention_fn = None
+        self._warned_fallback = False
         self.last_attn_weights: torch.Tensor | None = None  # Store for metrics
         self.last_attn_entropy: float = 0.0
         self.last_attn_entropy_normalized: float = 0.0
@@ -201,30 +217,130 @@ class SparseAttention:
         self.last_valid_neighbor_fraction_causal_cap = valid_fraction_causal_cap
         self.last_valid_neighbor_fraction_vs_causal_cap = valid_fraction_vs_cap
 
-    def forward(
-        self,
-        q: torch.Tensor,  # [B, H, T, Dh]
-        k: torch.Tensor,  # [B, H, T, Dh]
-        v: torch.Tensor,  # [B, H, T, Dh]
-        *,
-        attn_mask: torch.Tensor | None = None,
+    def _supports_fused_sparse(self, q: torch.Tensor, attn_mask: torch.Tensor | None) -> bool:
+        """Return whether we can run the fused sparse kernel for this call."""
+        if self.sparse_impl == "gather":
+            return False
+        if not _FLEX_ATTENTION_AVAILABLE:
+            return False
+        if attn_mask is not None:
+            # Fused path currently supports intrinsic sparse causal mask only.
+            return False
+        if q.device.type != "cuda":
+            return False
+        return True
+
+    def _build_sparse_adjacency(
+        self, indices_per_head: torch.Tensor, H: int, T: int, device: torch.device
     ) -> torch.Tensor:
-        """Compute sparse attention.
+        """Build dense [H, T, T] boolean adjacency from sparse neighbor indices."""
+        degree = indices_per_head.shape[-1]
+        adjacency = torch.zeros((H, T, T), dtype=torch.bool, device=device)
+        valid = indices_per_head >= 0
+        if valid.any():
+            h_idx = torch.arange(H, device=device, dtype=torch.long)[:, None, None].expand(
+                H, T, degree
+            )
+            q_idx = torch.arange(T, device=device, dtype=torch.long)[None, :, None].expand(
+                H, T, degree
+            )
+            adjacency[h_idx[valid], q_idx[valid], indices_per_head[valid]] = True
+        return adjacency
 
-        Args:
-            q, k, v: [B, H, T, Dh] query, key, value tensors
-            attn_mask: Optional [B, T] (key padding) or [B, H, T, T] (full mask)
-                       True=keep, False=mask out
+    def _get_fused_block_mask(
+        self, *, H: int, T: int, device: torch.device, indices_per_head: torch.Tensor
+    ) -> torch.Tensor:
+        """Get (or build) a cached BlockMask for fused sparse attention."""
+        cache_key = (
+            H,
+            T,
+            self.window_size,
+            self.expander_degree,
+            self.sparse_block_size,
+            str(device),
+        )
+        if cache_key in self.block_mask_cache:
+            return self.block_mask_cache[cache_key]
 
-        Returns:
-            [B, H, T, Dh] attention output
-        """
+        adjacency = self._build_sparse_adjacency(indices_per_head, H, T, device)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return adjacency[h, q_idx, kv_idx]
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=H,
+            Q_LEN=T,
+            KV_LEN=T,
+            device=device,
+            BLOCK_SIZE=self.sparse_block_size,
+        )
+        self.block_mask_cache[cache_key] = block_mask
+        return block_mask
+
+    def _get_fused_attention_fn(self):
+        """Get a compiled fused sparse attention function (cached)."""
+        if self._fused_attention_fn is not None:
+            return self._fused_attention_fn
+        assert flex_attention is not None
+        try:
+            self._fused_attention_fn = torch.compile(flex_attention, dynamic=True)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to compile fused sparse kernel with torch.compile: {type(e).__name__}: {e}"
+            ) from e
+        return self._fused_attention_fn
+
+    def _set_unavailable_weight_metrics(self) -> None:
+        """Set weight-derived metrics when fused path does not expose attention weights."""
+        self.last_attn_weights = None
+        self.last_attn_entropy = 0.0
+        self.last_attn_entropy_normalized = 0.0
+        self.last_attention_mass_window_pct = 0.0
+        self.last_attention_mass_expander_pct = 0.0
+        # Preserve structural valid-neighbor diagnostics for logging.
+        self.last_valid_neighbor_fraction = (
+            self.last_valid_neighbor_slots / self.last_total_neighbor_slots
+            if self.last_total_neighbor_slots > 0
+            else 0.0
+        )
+        if self.last_valid_neighbor_fraction_causal_cap > 0:
+            self.last_valid_neighbor_fraction_vs_causal_cap = (
+                self.last_valid_neighbor_fraction / self.last_valid_neighbor_fraction_causal_cap
+            )
+        else:
+            self.last_valid_neighbor_fraction_vs_causal_cap = 0.0
+
+    def _forward_fused(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        *,
+        indices_per_head: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run fused sparse attention via torch flex_attention."""
+        _, H, T, _ = q.shape
+        block_mask = self._get_fused_block_mask(
+            H=H, T=T, device=q.device, indices_per_head=indices_per_head
+        )
+        fused_attention_fn = self._get_fused_attention_fn()
+        output = fused_attention_fn(q, k, v, block_mask=block_mask)
+        self._set_unavailable_weight_metrics()
+        return output
+
+    def _forward_gather(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        *,
+        attn_mask: torch.Tensor | None,
+        indices_per_head: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run gather/scatter sparse attention (reference implementation)."""
         B, H, T, Dh = q.shape
-        device = q.device
-
-        # Build indices for each head (per-head variation)
-        indices_per_head = torch.stack([self._get_indices(T, h, device) for h in range(H)], dim=0)
-        self._compute_index_diagnostics(indices_per_head)
         degree = indices_per_head.shape[-1]
 
         # Expand indices for batch: [H, T, degree] -> [B, H, T, degree]
@@ -237,8 +353,6 @@ class SparseAttention:
         indices_clamped = indices_flat.clamp(min=0)
 
         # Gather K and V: [B*H, T, degree, Dh]
-        # Note: expand().gather() pattern is correct but memory-bandwidth heavy at long T.
-        # Future optimization: consider block-sparse kernels for very long sequences.
         indices_for_gather = indices_clamped[:, :, :, None].expand(B * H, T, degree, Dh)
         k_sparse = torch.gather(
             k_flat[:, :, None, :].expand(B * H, T, degree, Dh), dim=1, index=indices_for_gather
@@ -259,34 +373,69 @@ class SparseAttention:
         validity_mask = (indices_flat >= 0).reshape(B, H, T, degree)
         scores = scores.masked_fill(~validity_mask, float("-inf"))
 
-        # Apply padding/segment mask if provided
-        # Note: Masking strategy is safe because:
-        # 1. Invalid indices (-1) are clamped to 0 for gather (no out-of-bounds)
-        # 2. Validity mask applied first to -inf (invalid slots stay dead)
-        # 3. Padding/full masks applied per gathered neighbor (correct for sparse)
-        # 4. Softmax produces 0 weight for -inf slots (no NaN propagation)
         if attn_mask is not None:
             scores = self._apply_attention_mask(
                 scores, attn_mask, indices_clamped, indices_expanded, B, H, T, degree
             )
 
-        # Softmax over neighbors
         attn_weights = F.softmax(scores, dim=-1)
         attn_weights = torch.nan_to_num(attn_weights, 0.0)
 
-        # Store for metrics (detached to avoid graph retention)
         self.last_attn_weights = attn_weights.detach()
-
-        # Compute and store sparse attention metrics
         self._compute_attention_metrics(
             attn_weights.detach(),
             window_slot_mask=self._build_window_slot_mask(indices_expanded, T),
         )
+        return torch.einsum("bhtp,bhtpd->bhtd", attn_weights, v_sparse)
 
-        # Aggregate values: [B, H, T, Dh]
-        output = torch.einsum("bhtp,bhtpd->bhtd", attn_weights, v_sparse)
+    def forward(
+        self,
+        q: torch.Tensor,  # [B, H, T, Dh]
+        k: torch.Tensor,  # [B, H, T, Dh]
+        v: torch.Tensor,  # [B, H, T, Dh]
+        *,
+        attn_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Compute sparse attention.
 
-        return output
+        Args:
+            q, k, v: [B, H, T, Dh] query, key, value tensors
+            attn_mask: Optional [B, T] (key padding) or [B, H, T, T] (full mask)
+                       True=keep, False=mask out
+
+        Returns:
+            [B, H, T, Dh] attention output
+        """
+        _, H, T, _ = q.shape
+        device = q.device
+
+        # Build indices for each head (per-head variation) once per forward.
+        indices_per_head = torch.stack([self._get_indices(T, h, device) for h in range(H)], dim=0)
+        self._compute_index_diagnostics(indices_per_head)
+
+        if self._supports_fused_sparse(q, attn_mask):
+            try:
+                return self._forward_fused(q, k, v, indices_per_head=indices_per_head)
+            except Exception as e:
+                if self.sparse_impl == "flex":
+                    raise RuntimeError(
+                        f"Fused sparse attention failed with sparse_impl='flex': {type(e).__name__}: {e}"
+                    ) from e
+                if not self._warned_fallback:
+                    warnings.warn(
+                        "Fused sparse attention failed; falling back to gather path. "
+                        f"Error: {type(e).__name__}: {e}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    self._warned_fallback = True
+        elif self.sparse_impl == "flex":
+            raise RuntimeError(
+                "sparse_impl='flex' requested, but fused path is unavailable for this call "
+                "(requires CUDA, torch.nn.attention.flex_attention, and attn_mask=None)."
+            )
+
+        return self._forward_gather(q, k, v, attn_mask=attn_mask, indices_per_head=indices_per_head)
 
     def _apply_attention_mask(
         self,
