@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from orion.attention.base import AttentionConfig
@@ -637,3 +638,34 @@ class TestSparseAttentionEdgeCases:
 
         # Check that repeated call returns same object (cached)
         assert indices_16 is indices_16_again
+
+    def test_sparse_impl_flex_raises_without_cuda(self):
+        """Forcing fused sparse implementation should fail on CPU-only calls."""
+        B, H, T, Dh = 1, 2, 16, 8
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="flex"
+        )
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        with pytest.raises(RuntimeError, match="sparse_impl='flex' requested"):
+            _ = attn.forward(q, k, v)
+
+    def test_sparse_impl_gather_forces_reference_path(self):
+        """Explicit gather impl should keep metrics available."""
+        B, H, T, Dh = 1, 2, 16, 8
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="gather"
+        )
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        out = attn.forward(q, k, v)
+        assert out.shape == (B, H, T, Dh)
+        assert attn.last_attn_weights is not None

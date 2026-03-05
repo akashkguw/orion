@@ -1,6 +1,9 @@
 # orion/data/shakespeare.py
 from __future__ import annotations
 
+import shutil
+import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,13 +13,56 @@ import torch
 SHAKESPEARE_URL = (
     "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
 )
+MIN_SHAKESPEARE_BYTES = 100_000
+DOWNLOAD_RETRIES = 5
+DOWNLOAD_TIMEOUT_SECONDS = 30
 
 
 def _download_if_needed(path: Path) -> None:
+    """Download tinyshakespeare with retries and atomic file replacement."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
+    if path.exists() and path.stat().st_size >= MIN_SHAKESPEARE_BYTES:
         return
-    urllib.request.urlretrieve(SHAKESPEARE_URL, path)
+    if path.exists():
+        path.unlink()
+
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    last_error: Exception | None = None
+
+    for attempt in range(1, DOWNLOAD_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(SHAKESPEARE_URL, timeout=DOWNLOAD_TIMEOUT_SECONDS) as resp:
+                content_length = resp.headers.get("Content-Length")
+                expected_size = (
+                    int(content_length) if content_length and content_length.isdigit() else None
+                )
+                with tmp_path.open("wb") as f:
+                    shutil.copyfileobj(resp, f)
+
+            actual_size = tmp_path.stat().st_size
+            if expected_size is not None and actual_size < expected_size:
+                raise urllib.error.ContentTooShortError(
+                    f"retrieval incomplete: got {actual_size} out of {expected_size} bytes",
+                    None,
+                )
+            if actual_size < MIN_SHAKESPEARE_BYTES:
+                raise urllib.error.ContentTooShortError(
+                    f"downloaded file too small: got {actual_size} bytes",
+                    None,
+                )
+
+            tmp_path.replace(path)
+            return
+        except (OSError, urllib.error.URLError, urllib.error.ContentTooShortError) as exc:
+            last_error = exc
+            if tmp_path.exists():
+                tmp_path.unlink()
+            if attempt < DOWNLOAD_RETRIES:
+                time.sleep(min(2 ** (attempt - 1), 8))
+
+    raise RuntimeError(
+        f"Failed to download tinyshakespeare after {DOWNLOAD_RETRIES} attempts: {last_error}"
+    ) from last_error
 
 
 @dataclass
