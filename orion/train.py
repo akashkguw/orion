@@ -101,6 +101,16 @@ def train(
     # -------- Model / Optim --------
     model_name = str(cfg.get("model", "name", default="tiny"))
     attention_cfg = cfg.attention_config()
+    if attention_cfg.backend.lower() == "sparse":
+        configured_window = (
+            attention_cfg.window_size if attention_cfg.window_size is not None else 64
+        )
+        if configured_window >= seq_len:
+            print(
+                "Warning: sparse attention configured with "
+                f"window_size={configured_window} >= seq_len={seq_len}. "
+                "This can collapse sparse behavior to near-dense."
+            )
 
     model = build_model(
         name=model_name,
@@ -232,8 +242,16 @@ def train(
             attention_entropy = 0.0
             attention_entropy_normalized = 0.0
             valid_neighbor_fraction = 0.0
+            valid_neighbor_fraction_causal_cap = 0.0
+            valid_neighbor_fraction_vs_causal_cap = 0.0
             attention_mass_window_pct = 0.0
             attention_mass_expander_pct = 0.0
+            total_neighbor_slots = 0
+            valid_neighbor_slots = 0
+            invalid_neighbor_slots = 0
+            future_neighbor_slots = 0
+            duplicate_neighbor_slots = 0
+            sparse_backend = None
 
             try:
                 sparse_backend, dense_backend = _find_attention_backends(model)
@@ -247,11 +265,32 @@ def train(
                     valid_neighbor_fraction = getattr(
                         sparse_backend, "last_valid_neighbor_fraction", 0.0
                     )
+                    valid_neighbor_fraction_causal_cap = getattr(
+                        sparse_backend, "last_valid_neighbor_fraction_causal_cap", 0.0
+                    )
+                    valid_neighbor_fraction_vs_causal_cap = getattr(
+                        sparse_backend, "last_valid_neighbor_fraction_vs_causal_cap", 0.0
+                    )
                     attention_mass_window_pct = getattr(
                         sparse_backend, "last_attention_mass_window_pct", 0.0
                     )
                     attention_mass_expander_pct = getattr(
                         sparse_backend, "last_attention_mass_expander_pct", 0.0
+                    )
+                    total_neighbor_slots = int(
+                        getattr(sparse_backend, "last_total_neighbor_slots", 0)
+                    )
+                    valid_neighbor_slots = int(
+                        getattr(sparse_backend, "last_valid_neighbor_slots", 0)
+                    )
+                    invalid_neighbor_slots = int(
+                        getattr(sparse_backend, "last_invalid_neighbor_slots", 0)
+                    )
+                    future_neighbor_slots = int(
+                        getattr(sparse_backend, "last_future_neighbor_slots", 0)
+                    )
+                    duplicate_neighbor_slots = int(
+                        getattr(sparse_backend, "last_duplicate_neighbor_slots", 0)
                     )
                 # Fall back to dense
                 elif dense_backend is not None:
@@ -272,7 +311,20 @@ def train(
                 attention_mass_window_pct=attention_mass_window_pct,
                 attention_mass_expander_pct=attention_mass_expander_pct,
             )
-            logger.log({"type": "window", **metrics_to_dict(window_metrics)})
+            window_payload = {"type": "window", **metrics_to_dict(window_metrics)}
+            if sparse_backend is not None:
+                window_payload.update(
+                    {
+                        "valid_neighbor_fraction_causal_cap": valid_neighbor_fraction_causal_cap,
+                        "valid_neighbor_fraction_vs_causal_cap": valid_neighbor_fraction_vs_causal_cap,
+                        "total_neighbor_slots": total_neighbor_slots,
+                        "valid_neighbor_slots": valid_neighbor_slots,
+                        "invalid_neighbor_slots": invalid_neighbor_slots,
+                        "future_neighbor_slots": future_neighbor_slots,
+                        "duplicate_neighbor_slots": duplicate_neighbor_slots,
+                    }
+                )
+            logger.log(window_payload)
 
             # Print window metrics summary
             print(
@@ -288,6 +340,15 @@ def train(
                     f"window_mass={attention_mass_window_pct:.1f}%, "
                     f"expander_mass={attention_mass_expander_pct:.1f}%"
                 )
+                if valid_neighbor_fraction_causal_cap > 0:
+                    print(
+                        "    Sparse diag: "
+                        f"valid_vs_causal_cap={valid_neighbor_fraction_vs_causal_cap:.3f} "
+                        f"(actual={valid_neighbor_fraction:.3f}, "
+                        f"cap={valid_neighbor_fraction_causal_cap:.3f}), "
+                        f"future_edges={future_neighbor_slots}, "
+                        f"duplicate_edges={duplicate_neighbor_slots}"
+                    )
 
         # Save checkpoint before eval
         if step % save_every == 0 or step % 1000 == 0:

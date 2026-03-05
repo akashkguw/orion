@@ -110,8 +110,15 @@ class SparseAttention:
         self.last_attn_entropy: float = 0.0
         self.last_attn_entropy_normalized: float = 0.0
         self.last_valid_neighbor_fraction: float = 0.0
+        self.last_valid_neighbor_fraction_causal_cap: float = 0.0
+        self.last_valid_neighbor_fraction_vs_causal_cap: float = 0.0
         self.last_attention_mass_window_pct: float = 0.0
         self.last_attention_mass_expander_pct: float = 0.0
+        self.last_total_neighbor_slots: int = 0
+        self.last_valid_neighbor_slots: int = 0
+        self.last_invalid_neighbor_slots: int = 0
+        self.last_future_neighbor_slots: int = 0
+        self.last_duplicate_neighbor_slots: int = 0
 
     def _get_indices(self, n: int, h: int, device: torch.device | str) -> torch.Tensor:
         """Get or build sparse indices for a given sequence length and head.
@@ -136,6 +143,64 @@ class SparseAttention:
             )
         return self.indices_cache[cache_key]
 
+    def _compute_index_diagnostics(self, indices_per_head: torch.Tensor) -> None:
+        """Compute structural diagnostics for sparse index quality.
+
+        Args:
+            indices_per_head: [H, T, degree] sparse neighbor indices
+        """
+        if indices_per_head.numel() == 0:
+            self.last_total_neighbor_slots = 0
+            self.last_valid_neighbor_slots = 0
+            self.last_invalid_neighbor_slots = 0
+            self.last_future_neighbor_slots = 0
+            self.last_duplicate_neighbor_slots = 0
+            self.last_valid_neighbor_fraction_causal_cap = 0.0
+            self.last_valid_neighbor_fraction_vs_causal_cap = 0.0
+            return
+
+        H, T, degree = indices_per_head.shape
+        valid = indices_per_head >= 0
+
+        total_slots = H * T * degree
+        valid_slots = int(valid.sum().item())
+        invalid_slots = total_slots - valid_slots
+
+        query_positions = torch.arange(
+            T, device=indices_per_head.device, dtype=indices_per_head.dtype
+        )[None, :, None]
+        future_slots = int(((indices_per_head > query_positions) & valid).sum().item())
+
+        # Count duplicate valid neighbors per [head, query] row.
+        slot_idx = torch.arange(
+            degree, device=indices_per_head.device, dtype=indices_per_head.dtype
+        )[None, None, :]
+        safe = torch.where(valid, indices_per_head, -(slot_idx + 1))
+        sorted_safe, _ = torch.sort(safe, dim=-1)
+        duplicate_slots = int(
+            ((sorted_safe[..., 1:] == sorted_safe[..., :-1]) & (sorted_safe[..., 1:] >= 0))
+            .sum()
+            .item()
+        )
+
+        q_plus_one = torch.arange(1, T + 1, device=indices_per_head.device)
+        cap = torch.minimum(q_plus_one, torch.tensor(degree, device=indices_per_head.device))
+        valid_fraction_causal_cap = (
+            float((cap.float().mean() / degree).item()) if degree > 0 else 0.0
+        )
+        valid_fraction = valid_slots / total_slots if total_slots > 0 else 0.0
+        valid_fraction_vs_cap = (
+            valid_fraction / valid_fraction_causal_cap if valid_fraction_causal_cap > 0 else 0.0
+        )
+
+        self.last_total_neighbor_slots = total_slots
+        self.last_valid_neighbor_slots = valid_slots
+        self.last_invalid_neighbor_slots = invalid_slots
+        self.last_future_neighbor_slots = future_slots
+        self.last_duplicate_neighbor_slots = duplicate_slots
+        self.last_valid_neighbor_fraction_causal_cap = valid_fraction_causal_cap
+        self.last_valid_neighbor_fraction_vs_causal_cap = valid_fraction_vs_cap
+
     def forward(
         self,
         q: torch.Tensor,  # [B, H, T, Dh]
@@ -159,6 +224,7 @@ class SparseAttention:
 
         # Build indices for each head (per-head variation)
         indices_per_head = torch.stack([self._get_indices(T, h, device) for h in range(H)], dim=0)
+        self._compute_index_diagnostics(indices_per_head)
         degree = indices_per_head.shape[-1]
 
         # Expand indices for batch: [H, T, degree] -> [B, H, T, degree]
@@ -356,6 +422,7 @@ class SparseAttention:
             self.last_valid_neighbor_fraction = 0.0
             self.last_attention_mass_window_pct = 0.0
             self.last_attention_mass_expander_pct = 0.0
+            self.last_valid_neighbor_fraction_vs_causal_cap = 0.0
             return
 
         degree = attn_weights.shape[-1]
@@ -389,5 +456,11 @@ class SparseAttention:
         self.last_attn_entropy = entropy
         self.last_attn_entropy_normalized = entropy_normalized
         self.last_valid_neighbor_fraction = valid_neighbor_fraction
+        if self.last_valid_neighbor_fraction_causal_cap > 0:
+            self.last_valid_neighbor_fraction_vs_causal_cap = (
+                valid_neighbor_fraction / self.last_valid_neighbor_fraction_causal_cap
+            )
+        else:
+            self.last_valid_neighbor_fraction_vs_causal_cap = 0.0
         self.last_attention_mass_window_pct = window_pct
         self.last_attention_mass_expander_pct = expander_pct

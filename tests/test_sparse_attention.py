@@ -175,6 +175,40 @@ class TestSparseAttention:
         assert attn.last_attention_mass_window_pct == 0.0
         assert attn.last_attention_mass_expander_pct == 100.0
 
+    def test_index_diagnostics_have_no_future_or_duplicates(self):
+        """Sparse index diagnostics should report no future/duplicate edges."""
+        B, H, T, Dh = 2, 4, 64, 32
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+        _ = attn.forward(q, k, v)
+
+        assert attn.last_future_neighbor_slots == 0
+        assert attn.last_duplicate_neighbor_slots == 0
+        assert attn.last_valid_neighbor_fraction_causal_cap > 0.0
+        assert attn.last_valid_neighbor_fraction_vs_causal_cap > 0.99
+
+    def test_causal_cap_fraction_matches_theory_for_large_window(self):
+        """Causal-cap expected valid fraction should match analytic value."""
+        B, H, T, Dh = 1, 1, 256, 8
+        window_size, expander_degree = 256, 16
+        cfg = AttentionConfig(
+            backend="sparse", window_size=window_size, expander_degree=expander_degree
+        )
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+        _ = attn.forward(q, k, v)
+
+        degree = window_size + expander_degree
+        expected = sum(min(i + 1, degree) for i in range(T)) / (T * degree)
+        assert abs(attn.last_valid_neighbor_fraction_causal_cap - expected) < 1e-6
+
     def test_forward_with_padding_mask(self):
         """Test forward pass with padding mask."""
         B, H, T, Dh = 2, 4, 32, 64
