@@ -72,6 +72,17 @@ class TestBuildSparseIndices:
 
         assert torch.equal(indices1, indices2), "Same head_idx should produce identical patterns"
 
+    def test_no_duplicate_valid_neighbors_per_query(self):
+        """Valid neighbors should be unique per query after deduplication."""
+        n, window_size, expander_degree = 64, 8, 16
+        indices = build_sparse_indices(n, window_size, expander_degree, head_idx=0, device="cpu")
+
+        for q in range(n):
+            valid = [idx for idx in indices[q].tolist() if idx >= 0]
+            assert len(valid) == len(set(valid)), (
+                f"Query {q} has duplicate valid neighbors: {valid}"
+            )
+
     def test_small_sequence(self):
         """Test with very small sequence length."""
         n, window_size, expander_degree = 4, 2, 2
@@ -147,6 +158,22 @@ class TestSparseAttention:
         output = attn.forward(q, k, v)
 
         assert not torch.isnan(output).any()
+
+    def test_attention_mass_split_uses_window_slot_mask(self):
+        """Mass split should be computed from semantic window membership, not slot position."""
+        cfg = AttentionConfig(backend="sparse", window_size=3, expander_degree=1)
+        attn = SparseAttention(cfg)
+
+        # One query token, four sparse neighbors.
+        # All attention mass goes to slot #1.
+        attn_weights = torch.tensor([[[[0.0, 1.0, 0.0, 0.0]]]], dtype=torch.float32)
+        # Only slot #0 is in-window; slot #1 is expander.
+        window_slot_mask = torch.tensor([[[[True, False, False, False]]]])
+
+        attn._compute_attention_metrics(attn_weights, window_slot_mask=window_slot_mask)
+
+        assert attn.last_attention_mass_window_pct == 0.0
+        assert attn.last_attention_mass_expander_pct == 100.0
 
     def test_forward_with_padding_mask(self):
         """Test forward pass with padding mask."""

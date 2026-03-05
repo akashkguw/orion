@@ -45,13 +45,12 @@ def build_sparse_indices(
 
     for q in range(n):
         # 1. Local window: [q-window_size, ..., q-1, q]
-        window_neighbors = []
         window_start = max(0, q - window_size + 1)
-        for i in range(window_start, q + 1):
-            window_neighbors.append(i)
+        window_neighbors = list(range(window_start, q + 1))
+        neighbors_list = list(window_neighbors)
+        neighbors_set = set(window_neighbors)
 
         # 2. Expander edges using modular arithmetic with per-head offset
-        expander_neighbors = []
         if n > 1:
             mod = n  # Full-range modulus for better coverage
             head_offset = (head_idx * 7) % mod  # Prime-like multiplier for variation
@@ -59,16 +58,13 @@ def build_sparse_indices(
             for s in range(1, expander_degree + 1):
                 offset = ((s * s) + head_offset) % mod
                 k = q - offset
-                # Note: When offset == 0, k == q (self-attention), which is deduped by set
-                if k >= 0 and k not in window_neighbors:
-                    expander_neighbors.append(k)
-
-        # Combine: window first, then expander
-        neighbors_list = window_neighbors + expander_neighbors
+                # Deduplicate against both window and previously added expander keys.
+                if k >= 0 and k not in neighbors_set:
+                    neighbors_list.append(k)
+                    neighbors_set.add(k)
 
         # Refill strategy: pad with additional window positions if needed
         if len(neighbors_list) < target_degree:
-            neighbors_set = set(neighbors_list)
             refill_start = max(0, q - window_size - expander_degree)
             refill_end = max(0, q - window_size + 1)
 
@@ -216,7 +212,10 @@ class SparseAttention:
         self.last_attn_weights = attn_weights.detach()
 
         # Compute and store sparse attention metrics
-        self._compute_attention_metrics(attn_weights.detach())
+        self._compute_attention_metrics(
+            attn_weights.detach(),
+            window_slot_mask=self._build_window_slot_mask(indices_expanded, T),
+        )
 
         # Aggregate values: [B, H, T, Dh]
         output = torch.einsum("bhtp,bhtpd->bhtd", attn_weights, v_sparse)
@@ -328,11 +327,26 @@ class SparseAttention:
 
         return scores.masked_fill(~key_ok_neighbors, float("-inf"))
 
-    def _compute_attention_metrics(self, attn_weights: torch.Tensor) -> None:
+    def _build_window_slot_mask(self, indices_expanded: torch.Tensor, T: int) -> torch.Tensor:
+        """Return [B, H, T, degree] mask for neighbors that are inside local window."""
+        # indices_expanded: [B, H, T, degree]
+        device = indices_expanded.device
+        query_positions = torch.arange(T, device=device, dtype=indices_expanded.dtype)[
+            None, None, :, None
+        ]
+        window_start = query_positions - (self.window_size - 1)
+        in_window = (indices_expanded >= window_start) & (indices_expanded <= query_positions)
+        valid_indices = indices_expanded >= 0
+        return in_window & valid_indices
+
+    def _compute_attention_metrics(
+        self, attn_weights: torch.Tensor, *, window_slot_mask: torch.Tensor | None = None
+    ) -> None:
         """Compute and store attention metrics from weights.
 
         Args:
             attn_weights: [B, H, T, degree] attention weights (detached)
+            window_slot_mask: Optional [B, H, T, degree] boolean mask for local-window slots
         """
         import math
 
@@ -357,8 +371,14 @@ class SparseAttention:
         valid_neighbor_fraction = eff_degree / degree if degree > 0 else 0.0
 
         # Attention mass split: window vs expander
-        window_mass = attn_weights[..., : self.window_size].sum(dim=-1).mean().item()
-        expander_mass = attn_weights[..., self.window_size :].sum(dim=-1).mean().item()
+        if window_slot_mask is None:
+            window_mass = attn_weights[..., : self.window_size].sum(dim=-1).mean().item()
+            expander_mass = attn_weights[..., self.window_size :].sum(dim=-1).mean().item()
+        else:
+            window_mask_f = window_slot_mask.to(dtype=attn_weights.dtype)
+            expander_mask_f = (~window_slot_mask).to(dtype=attn_weights.dtype)
+            window_mass = (attn_weights * window_mask_f).sum(dim=-1).mean().item()
+            expander_mass = (attn_weights * expander_mask_f).sum(dim=-1).mean().item()
         total = window_mass + expander_mass
         if total > 0:
             window_pct = 100.0 * window_mass / total
