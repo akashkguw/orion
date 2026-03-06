@@ -77,5 +77,9 @@ def test_model_attention_combinations(model_name: str, attention_backend: str | 
 
         # First line is run metrics; verify attention degree uses configured values.
         run_obj = json.loads(lines[0])
-        if attention_backend:
+        if attention_backend == "dense":
+            assert run_obj["attention_degree"] == 16  # seq_len
+        elif attention_backend == "window":
+            assert run_obj["attention_degree"] == 8  # min(seq_len, window_size)
+        elif attention_backend == "sparse":
             assert run_obj["attention_degree"] == 10  # window_size + expander_degree

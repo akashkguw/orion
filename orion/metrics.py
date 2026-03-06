@@ -313,17 +313,19 @@ class MetricsTracker:
     def record_run_metrics(
         self,
         step: int,
-        window_size: int,
-        expander_degree: int,
+        attention_backend: str,
         batch_size: int,
         seq_len: int,
         n_layers: int,
         n_heads: int,
+        window_size: int | None = None,
+        expander_degree: int | None = None,
     ) -> RunMetrics:
         """Record run-level metrics (logged once per run).
 
         Args:
             step: Step number
+            attention_backend: Attention backend name ("dense" | "window" | "sparse")
             window_size: Attention window size
             expander_degree: Attention expander degree
             batch_size: Batch size
@@ -334,7 +336,19 @@ class MetricsTracker:
         Returns:
             RunMetrics object
         """
-        degree = window_size + expander_degree
+        backend = attention_backend.lower().strip()
+        if backend == "dense":
+            degree = seq_len
+        elif backend == "window":
+            resolved_window = window_size if window_size is not None else 64
+            degree = min(seq_len, max(1, int(resolved_window)))
+        elif backend == "sparse":
+            resolved_window = window_size if window_size is not None else 64
+            resolved_expander = expander_degree if expander_degree is not None else 8
+            degree = min(seq_len, max(1, int(resolved_window))) + max(0, int(resolved_expander))
+        else:
+            degree = seq_len
+
         compute_proxy_per_token = degree
         compute_proxy_per_seq = seq_len * degree
         compute_proxy_per_step = batch_size * n_heads * seq_len * degree

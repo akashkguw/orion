@@ -231,6 +231,7 @@ class TestMetricsTracker:
         tracker = MetricsTracker()
         metrics = tracker.record_run_metrics(
             step=1,
+            attention_backend="sparse",
             window_size=64,
             expander_degree=8,
             batch_size=16,
@@ -245,6 +246,41 @@ class TestMetricsTracker:
         assert metrics.compute_proxy_per_token == 72
         assert metrics.compute_proxy_per_seq == 256 * 72
         assert metrics.compute_proxy_per_step == 16 * 8 * 256 * 72
+
+    def test_record_run_metrics_dense_backend(self):
+        """Dense backend should use full sequence length as degree proxy."""
+        tracker = MetricsTracker()
+        metrics = tracker.record_run_metrics(
+            step=1,
+            attention_backend="dense",
+            batch_size=4,
+            seq_len=128,
+            n_layers=2,
+            n_heads=4,
+        )
+
+        assert metrics.attention_degree == 128
+        assert metrics.compute_proxy_per_token == 128
+        assert metrics.compute_proxy_per_seq == 128 * 128
+        assert metrics.compute_proxy_per_step == 4 * 4 * 128 * 128
+
+    def test_record_run_metrics_window_backend(self):
+        """Window backend degree should be capped by sequence length."""
+        tracker = MetricsTracker()
+        metrics = tracker.record_run_metrics(
+            step=1,
+            attention_backend="window",
+            window_size=256,
+            batch_size=2,
+            seq_len=64,
+            n_layers=2,
+            n_heads=2,
+        )
+
+        assert metrics.attention_degree == 64
+        assert metrics.compute_proxy_per_token == 64
+        assert metrics.compute_proxy_per_seq == 64 * 64
+        assert metrics.compute_proxy_per_step == 2 * 2 * 64 * 64
 
     def test_record_eval_metrics(self):
         """Test eval metrics recording."""

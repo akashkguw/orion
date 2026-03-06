@@ -106,3 +106,19 @@ def test_download_if_needed_retries_on_partial_content(tmp_path, monkeypatch: py
 
     assert attempts["n"] == 2
     assert path.read_bytes() == good_payload
+
+
+def test_sample_batch_supports_single_valid_start():
+    ids = torch.arange(11, dtype=torch.long)
+    x, y = shakespeare.sample_batch(ids, batch_size=3, seq_len=10, device=torch.device("cpu"))
+
+    assert x.shape == (3, 10)
+    assert y.shape == (3, 10)
+    assert torch.equal(x, ids[:10].repeat(3, 1))
+    assert torch.equal(y, ids[1:11].repeat(3, 1))
+
+
+def test_sample_batch_raises_for_short_sequence():
+    ids = torch.arange(10, dtype=torch.long)
+    with pytest.raises(ValueError, match="Not enough tokens"):
+        shakespeare.sample_batch(ids, batch_size=2, seq_len=10, device=torch.device("cpu"))
