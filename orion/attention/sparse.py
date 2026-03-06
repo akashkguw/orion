@@ -127,6 +127,7 @@ class SparseAttention:
         self.block_mask_cache: dict[tuple, torch.Tensor] = {}
         self._fused_attention_fn = None
         self._warned_fallback = False
+        self._warned_compile_fallback = False
         self.last_attn_weights: torch.Tensor | None = None  # Store for metrics
         self.last_attn_entropy: float = 0.0
         self.last_attn_entropy_normalized: float = 0.0
@@ -259,12 +260,23 @@ class SparseAttention:
         if cache_key in self.block_mask_cache:
             return self.block_mask_cache[cache_key]
 
-        neighbors = indices_per_head  # [H, T, degree]
+        # Build exact token-level adjacency for mask_mod lookup.
+        # This keeps mask_mod pointwise/index-only (no reductions), which is
+        # required for robust Inductor lowering in flex attention.
+        degree = indices_per_head.shape[-1]
+        adjacency = torch.zeros((H, T, T), dtype=torch.bool, device=device)
+        valid = indices_per_head >= 0
+        if valid.any():
+            h_idx = torch.arange(H, device=device, dtype=torch.long)[:, None, None].expand(
+                H, T, degree
+            )
+            q_idx = torch.arange(T, device=device, dtype=torch.long)[None, :, None].expand(
+                H, T, degree
+            )
+            adjacency[h_idx[valid], q_idx[valid], indices_per_head[valid]] = True
 
         def mask_mod(b, h, q_idx, kv_idx):
-            row = neighbors[h, q_idx]  # [..., degree]
-            valid = row >= 0
-            return ((row == kv_idx[..., None]) & valid).any(dim=-1)
+            return adjacency[h, q_idx, kv_idx]
 
         block_mask = create_block_mask(
             mask_mod,
@@ -325,7 +337,21 @@ class SparseAttention:
             H=H, T=T, device=q.device, indices_per_head=indices_per_head
         )
         fused_attention_fn = self._get_fused_attention_fn()
-        output = fused_attention_fn(q, k, v, block_mask=block_mask)
+        try:
+            output = fused_attention_fn(q, k, v, block_mask=block_mask)
+        except Exception:
+            # Retry once in eager flex mode if compiled flex lowering fails.
+            if flex_attention is None or fused_attention_fn is flex_attention:
+                raise
+            self._fused_attention_fn = flex_attention
+            if not self._warned_compile_fallback:
+                warnings.warn(
+                    "Compiled flex_attention failed at runtime; retrying with eager flex_attention.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                self._warned_compile_fallback = True
+            output = self._fused_attention_fn(q, k, v, block_mask=block_mask)
         self._set_unavailable_weight_metrics()
         return output
 
