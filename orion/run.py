@@ -43,6 +43,7 @@ def main() -> None:
     p.add_argument("--run-id", default=None)
     p.add_argument("--resume", nargs="?", const="auto", default=None)
     p.add_argument("--save-every", type=int, default=None)
+    p.add_argument("--steps", type=int, default=None, help="Override run.steps from config")
     p.add_argument("--checkpoint", default=None)
     args = p.parse_args()
 
@@ -83,7 +84,8 @@ def main() -> None:
                 cfg,
                 device=device,
                 resume_path=resume_path,
-                save_every_override=args.save_every,
+                save_every_override=args.save_every or args.steps,
+                steps_override=args.steps,
             )
 
         if args.mode in {"eval", "both"}:
