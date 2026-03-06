@@ -160,3 +160,31 @@ def test_cli_run_with_all_options(monkeypatch: pytest.MonkeyPatch):
         "--checkpoint",
         "runs/latest/checkpoint.pt",
     ]
+
+
+def test_cli_run_with_steps(monkeypatch: pytest.MonkeyPatch):
+    cmd = _run_cli(
+        monkeypatch,
+        [
+            "orion",
+            "run",
+            "--config",
+            "configs/golden.yaml",
+            "--mode",
+            "train",
+            "--steps",
+            "123",
+        ],
+    )
+
+    assert cmd == [
+        sys.executable,
+        "-m",
+        "orion.run",
+        "--config",
+        "configs/golden.yaml",
+        "--mode",
+        "train",
+        "--steps",
+        "123",
+    ]

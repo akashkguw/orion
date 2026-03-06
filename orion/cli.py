@@ -28,6 +28,7 @@ def main() -> None:
     r.add_argument("--run-id", default=None)
     r.add_argument("--resume", nargs="?", const="auto", default=None)
     r.add_argument("--save-every", type=int, default=None)
+    r.add_argument("--steps", type=int, default=None)
     r.add_argument("--checkpoint", default=None)
 
     args = p.parse_args()
@@ -80,6 +81,8 @@ def main() -> None:
                 cmd += [args.resume]
         if args.save_every is not None:
             cmd += ["--save-every", str(args.save_every)]
+        if args.steps is not None:
+            cmd += ["--steps", str(args.steps)]
         if args.checkpoint is not None:
             cmd += ["--checkpoint", args.checkpoint]
         raise SystemExit(subprocess.call(cmd))

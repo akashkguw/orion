@@ -168,13 +168,10 @@ def train(
             return (step - 1) // steps_per_epoch + 1
         return step
 
-    # Get attention config for metrics
+    # Capture attention config for run-level metrics.
+    attention_backend = attention_cfg.backend.lower()
     window_size = attention_cfg.window_size
     expander_degree = attention_cfg.expander_degree
-    if window_size is None:
-        window_size = int(cfg.get("model", "window_size", default=64))
-    if expander_degree is None:
-        expander_degree = int(cfg.get("model", "expander_degree", default=8))
 
     # -------- Train loop --------
     model.train()
@@ -185,12 +182,13 @@ def train(
     if start_step == 0:
         run_metrics = metrics_tracker.record_run_metrics(
             step=0,
-            window_size=window_size,
-            expander_degree=expander_degree,
+            attention_backend=attention_backend,
             batch_size=batch_size,
             seq_len=seq_len,
             n_layers=n_layers,
             n_heads=n_heads,
+            window_size=window_size,
+            expander_degree=expander_degree,
         )
         logger.log({"type": "run", **metrics_to_dict(run_metrics)})
 
