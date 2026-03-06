@@ -140,6 +140,7 @@ class SparseAttention:
         self.last_valid_neighbor_fraction_vs_causal_cap: float = 0.0
         self.last_attention_mass_window_pct: float = 0.0
         self.last_attention_mass_expander_pct: float = 0.0
+        self.last_attn_score_mean: float = 0.0
         self.last_total_neighbor_slots: int = 0
         self.last_valid_neighbor_slots: int = 0
         self.last_invalid_neighbor_slots: int = 0
@@ -507,6 +508,9 @@ class SparseAttention:
         # Compute attention scores: [B, H, T, degree]
         scale = Dh**-0.5
         scores = torch.einsum("bhtd,bhtpd->bhtp", q, k_sparse) * scale
+
+        # Track mean absolute score for stability monitoring
+        self.last_attn_score_mean = float(scores.detach().abs().mean().item())
 
         # Apply validity mask for invalid indices (-1)
         validity_mask = (indices_flat >= 0).reshape(B, H, T, degree)

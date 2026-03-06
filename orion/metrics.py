@@ -38,6 +38,7 @@ class WindowMetrics:
     valid_neighbor_fraction: float = 0.0
     attention_mass_window_pct: float = 0.0
     attention_mass_expander_pct: float = 0.0
+    attn_score_mean: float = 0.0
 
 
 @dataclass
@@ -49,6 +50,9 @@ class RunMetrics:
     compute_proxy_per_token: int
     compute_proxy_per_seq: int
     compute_proxy_per_step: int
+    qk_norm: bool = False
+    ortho_init: bool = False
+    spectral_norm: bool = False
 
 
 @dataclass
@@ -264,6 +268,7 @@ class MetricsTracker:
         valid_neighbor_fraction: float = 0.0,
         attention_mass_window_pct: float = 0.0,
         attention_mass_expander_pct: float = 0.0,
+        attn_score_mean: float = 0.0,
     ) -> WindowMetrics:
         """Record windowed metrics (every 50 steps).
 
@@ -308,6 +313,7 @@ class MetricsTracker:
             valid_neighbor_fraction=valid_neighbor_fraction,
             attention_mass_window_pct=attention_mass_window_pct,
             attention_mass_expander_pct=attention_mass_expander_pct,
+            attn_score_mean=attn_score_mean,
         )
 
     def record_run_metrics(
@@ -320,6 +326,9 @@ class MetricsTracker:
         n_heads: int,
         window_size: int | None = None,
         expander_degree: int | None = None,
+        qk_norm: bool = False,
+        ortho_init: bool = False,
+        spectral_norm: bool = False,
     ) -> RunMetrics:
         """Record run-level metrics (logged once per run).
 
@@ -359,6 +368,9 @@ class MetricsTracker:
             compute_proxy_per_token=compute_proxy_per_token,
             compute_proxy_per_seq=compute_proxy_per_seq,
             compute_proxy_per_step=compute_proxy_per_step,
+            qk_norm=qk_norm,
+            ortho_init=ortho_init,
+            spectral_norm=spectral_norm,
         )
 
     def record_eval_metrics(

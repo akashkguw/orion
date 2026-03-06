@@ -116,6 +116,7 @@ def train(
     # -------- Model / Optim --------
     model_name = str(cfg.get("model", "name", default="tiny"))
     attention_cfg = cfg.attention_config()
+    stability_cfg = cfg.stability_config()
     if attention_cfg.backend.lower() == "sparse":
         configured_window = (
             attention_cfg.window_size if attention_cfg.window_size is not None else 64
@@ -136,6 +137,7 @@ def train(
         mlp_mult=mlp_mult,
         device=device,
         attention_cfg=attention_cfg,
+        stability_cfg=stability_cfg,
     )
 
     opt = AdamW(model.parameters(), lr=float(cfg.get("optim", "lr", default=3e-4)))
@@ -189,6 +191,9 @@ def train(
             n_heads=n_heads,
             window_size=window_size,
             expander_degree=expander_degree,
+            qk_norm=stability_cfg.qk_norm,
+            ortho_init=stability_cfg.ortho_init,
+            spectral_norm=stability_cfg.spectral_norm,
         )
         logger.log({"type": "run", **metrics_to_dict(run_metrics)})
 
@@ -259,6 +264,7 @@ def train(
             valid_neighbor_fraction_vs_causal_cap = 0.0
             attention_mass_window_pct = float("nan")
             attention_mass_expander_pct = float("nan")
+            attn_score_mean = 0.0
             total_neighbor_slots = 0
             valid_neighbor_slots = 0
             invalid_neighbor_slots = 0
@@ -290,6 +296,7 @@ def train(
                     attention_mass_expander_pct = getattr(
                         sparse_backend, "last_attention_mass_expander_pct", float("nan")
                     )
+                    attn_score_mean = getattr(sparse_backend, "last_attn_score_mean", 0.0)
                     total_neighbor_slots = int(
                         getattr(sparse_backend, "last_total_neighbor_slots", 0)
                     )
@@ -311,6 +318,7 @@ def train(
                     attention_entropy_normalized = getattr(
                         dense_backend, "last_attn_entropy_normalized", float("nan")
                     )
+                    attn_score_mean = getattr(dense_backend, "last_attn_score_mean", 0.0)
             except (AttributeError, IndexError, TypeError) as e:
                 print(f"Warning: exception in attention metrics reading: {type(e).__name__}: {e}")
 
@@ -323,6 +331,7 @@ def train(
                 valid_neighbor_fraction=valid_neighbor_fraction,
                 attention_mass_window_pct=attention_mass_window_pct,
                 attention_mass_expander_pct=attention_mass_expander_pct,
+                attn_score_mean=attn_score_mean,
             )
             window_payload = {"type": "window", **metrics_to_dict(window_metrics)}
             if sparse_backend is not None:
@@ -349,7 +358,8 @@ def train(
                 f"div_rate={window_metrics.divergence_rate:.3f}, "
                 f"act_norm={activation_norm:.4f}, "
                 f"attn_ent={attention_entropy_str} (norm={attention_entropy_norm_str}), "
-                f"clip_rate={window_metrics.clip_rate:.3f}"
+                f"clip_rate={window_metrics.clip_rate:.3f}, "
+                f"attn_score_mean={attn_score_mean:.4f}"
             )
             if valid_neighbor_fraction > 0:
                 window_mass_str = _format_metric_or_na(

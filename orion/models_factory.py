@@ -33,16 +33,33 @@ class OrionDecoder(nn.Module):
         mlp_mult: int,
         attention_cfg: AttentionConfig,
         max_seq_len: int = 4096,
+        stability_cfg=None,
     ):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, d_model)
         # https://d2l.ai/chapter_attention-mechanisms-and-transformers/self-attention-and-positional-encoding.html#positional-encoding
         self.pos_emb = nn.Embedding(max_seq_len, d_model)  # learned positional embeddings
         self.blocks = nn.ModuleList(
-            [DecoderBlock(d_model, n_heads, attention_cfg, mlp_mult) for _ in range(n_layers)]
+            [
+                DecoderBlock(d_model, n_heads, attention_cfg, mlp_mult, stability_cfg)
+                for _ in range(n_layers)
+            ]
         )
         self.ln_f = nn.LayerNorm(d_model)  # final norm before output head
         self.head = nn.Linear(d_model, vocab_size, bias=False)  # bias=False: redundant with LN
+
+        # Apply weight init/norm after all blocks are constructed.
+        # Order matters: ortho init BEFORE spectral norm so the ortho-initialized
+        # weights become weight_orig in the spectral norm wrapper.
+        if stability_cfg is not None:
+            if stability_cfg.ortho_init:
+                from .stability import apply_ortho_init
+
+                apply_ortho_init(self)
+            if stability_cfg.spectral_norm:
+                from .stability import apply_spectral_norm
+
+                apply_spectral_norm(self)
 
     def forward(
         self, idx: torch.Tensor, return_residual: bool = False
@@ -84,6 +101,7 @@ def build_model(
     mlp_mult: int,
     device: torch.device,
     attention_cfg: AttentionConfig | None = None,
+    stability_cfg=None,
 ) -> nn.Module:
     """Build a model by name. attention_cfg only affects the 'orion' path."""
     name = (name or "tiny").lower()
@@ -101,6 +119,7 @@ def build_model(
             n_heads=n_heads,
             mlp_mult=mlp_mult,
             attention_cfg=attention_cfg,
+            stability_cfg=stability_cfg,
         ).to(device)
 
     raise ValueError(f"Unknown model.name={name!r}")

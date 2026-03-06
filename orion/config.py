@@ -91,6 +91,16 @@ class OrionConfig:
             sparse_probe_tokens=int(sparse_probe_tokens),
         )
 
+    def stability_config(self):
+        from .stability import StabilityConfig
+
+        s = self.get("stability", default={}) or {}
+        return StabilityConfig(
+            qk_norm=bool(s.get("qk_norm", False)),
+            ortho_init=bool(s.get("ortho_init", False)),
+            spectral_norm=bool(s.get("spectral_norm", False)),
+        )
+
 
 def load_config(path: str) -> OrionConfig:
     with open(path, encoding="utf-8") as f:
