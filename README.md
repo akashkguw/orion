@@ -77,7 +77,12 @@ attention:
   backend: sparse
   window_size: 64        # Local window
   expander_degree: 8     # Long-range neighbors
+  sparse_impl: flex      # flex-only sparse execution
+  sparse_block_size: 128 # Block size for flex backend
 ```
+
+`sparse_impl` modes:
+- `flex`: Require fused sparse path (raise if unavailable).
 
 **When to Use:**
 | Scenario | Recommendation |
@@ -149,6 +154,8 @@ attention:
   backend: sparse
   window_size: 64
   expander_degree: 8
+  sparse_impl: flex
+  sparse_block_size: 128
 
 optim:
   lr: 3e-4
@@ -196,7 +203,7 @@ orion/
 └── train_utils.py          # Training utilities
 
 configs/                     # Training configurations
-tests/                       # 149 tests (sparse, dense, metrics, models)
+tests/                       # 152 tests (sparse, dense, metrics, models)
 runs/                        # Training outputs (checkpoints, metrics)
 ```
 
@@ -286,7 +293,7 @@ cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract 
 - Linter: Ruff (E, F, I, B, UP rules)
 - Formatter: Ruff format
 - Type Checking: Full type annotations
-- Tests: 149 tests (sparse, dense, metrics, models)
+- Tests: 152 tests (sparse, dense, metrics, models)
 - Python: 3.11+
 
 **CI Pipeline:**
@@ -296,7 +303,7 @@ make test lint format-check  # Local CI (before commit)
 
 GitHub Actions runs on every PR:
 1. Lint & Format checks
-2. Full test suite (149 tests)
+2. Full test suite (152 tests)
 3. Smoke test (5-step training)
 
 ---
