@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 
@@ -669,3 +671,46 @@ class TestSparseAttentionEdgeCases:
         out = attn.forward(q, k, v)
         assert out.shape == (B, H, T, Dh)
         assert attn.last_attn_weights is not None
+
+    def test_unavailable_weight_metrics_are_nan(self):
+        """When fused weights are unavailable, entropy/mass metrics should be NaN (not zero)."""
+        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        attn = SparseAttention(cfg)
+        attn.last_total_neighbor_slots = 100
+        attn.last_valid_neighbor_slots = 60
+        attn.last_valid_neighbor_fraction_causal_cap = 0.6
+
+        attn._set_unavailable_weight_metrics()
+
+        assert math.isnan(attn.last_attn_entropy)
+        assert math.isnan(attn.last_attn_entropy_normalized)
+        assert math.isnan(attn.last_attention_mass_window_pct)
+        assert math.isnan(attn.last_attention_mass_expander_pct)
+        assert attn.last_valid_neighbor_fraction == 0.6
+        assert attn.last_valid_neighbor_fraction_vs_causal_cap == 1.0
+
+    def test_probe_metrics_compute_entropy_and_mass(self):
+        """Probe path should populate entropy/mass metrics without storing full weights."""
+        B, H, T, Dh = 2, 2, 32, 16
+        cfg = AttentionConfig(
+            backend="sparse",
+            window_size=8,
+            expander_degree=4,
+            sparse_probe_every=1,
+            sparse_probe_tokens=16,
+        )
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        indices_per_head = attn._get_indices_per_head(T=T, H=H, device=q.device)
+        attn._compute_index_diagnostics(indices_per_head)
+        attn._set_unavailable_weight_metrics()
+
+        attn._maybe_probe_weight_metrics(q, k, indices_per_head=indices_per_head)
+
+        assert not math.isnan(attn.last_attn_entropy)
+        assert not math.isnan(attn.last_attn_entropy_normalized)
+        assert not math.isnan(attn.last_attention_mass_window_pct)
+        assert not math.isnan(attn.last_attention_mass_expander_pct)
+        assert attn.last_attn_weights is None

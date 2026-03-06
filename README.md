@@ -1,15 +1,16 @@
 # Orion
 
-A research framework for long-context, decoder-only Transformers with **structured sparse attention** (sliding window + expander edges).
+A research framework for long-context, decoder-only Transformers with configurable attention backends (dense, window, sparse).
 
 Orion combines efficient sparse attention patterns with comprehensive metrics tracking to enable research on long-context language models. It provides multiple attention backends (dense, sparse, window), real-time metrics for model health monitoring, and reproducible training with deterministic checkpointing.
 
 **Key Features:**
-- **Sparse Attention** - O(T·(W+d)) vs O(T²) dense (7x faster on 512 tokens)
+- **Sparse Attention** - O(T·(W+d)) structured attention (window + expander)
+- **Window Attention** - O(T·W) sliding local context baseline
 - **Multiple Backends** - Dense, sparse, and window attention
 - **Real Metrics** - Activation norm, attention entropy, long-context eval
 - **Reproducible** - Deterministic training with seed control
-- **Well-tested** - 149 tests covering all components
+- **Well-tested** - 163 tests covering all components
 - **Production-ready** - Configs for 256-4K context lengths
 
 **Next Steps:**
@@ -31,7 +32,7 @@ python -m orion.train --config configs/golden.yaml
 ```
 
 **Google Colab (No Setup):**
-Click to open: [Orion-Master.ipynb](https://colab.research.google.com/github/akashkguw/orion/blob/main/orion.ipynb)
+Click to open: [orion.ipynb](https://colab.research.google.com/github/akashkguw/orion/blob/main/orion.ipynb)
 
 ---
 
@@ -79,19 +80,40 @@ attention:
   expander_degree: 8     # Long-range neighbors
   sparse_impl: flex      # flex-only sparse execution
   sparse_block_size: 128 # Block size for flex backend
+  sparse_probe_every: 50 # Optional: probe cadence for entropy/mass
+  sparse_probe_tokens: 256 # Optional: max tokens for each probe
 ```
 
 `sparse_impl` modes:
 - `flex`: Require fused sparse path (raise if unavailable).
+
+Note: fused `flex` does not expose full attention weights. Orion logs
+`attention_entropy/window_mass/expander_mass` as `NA` unless probe metrics are enabled.
 
 **When to Use:**
 | Scenario | Recommendation |
 |----------|---|
 | Long sequences (512+) | Use sparse |
 | Limited GPU memory | Use sparse |
+| Strong local baseline | Use window |
 | Short sequences (<256) | Dense is simpler |
 
 For details, see [SPARSE_ATTENTION_ARCHITECTURE.md](SPARSE_ATTENTION_ARCHITECTURE.md)
+
+## Window Attention
+
+Window attention uses a causal sliding window without expander edges:
+
+- Each query token attends only to positions in `[i-W+1, i]`
+- Complexity is **O(T·W)** vs dense **O(T²)**
+- Useful as a simple local-context baseline between dense and sparse
+
+**Configuration:**
+```yaml
+attention:
+  backend: window
+  window_size: 256
+```
 
 ## Norm Control (Next Step)
 
@@ -126,14 +148,17 @@ cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract 
 
 **Available Configs:**
 - `golden.yaml` - Dense attention baseline
+- `tinyshakespeare_window.yaml` - Window attention baseline
+- `exp_window_256.yaml` - Window attention with larger local context
 - `exp_sparse_smoke.yaml` - Sparse attention (quick test)
+- `exp_orion_sparse_smoke.yaml` - Sparse attention smoke test (Orion decoder)
 - `exp_sparse_window_256.yaml` - Sparse with larger window
 - `tinyshakespeare_*.yaml` - Various configurations
 
 **Configuration Example:**
 ```yaml
 run:
-  out_dir: runs/exp_shakespeare_dense
+  out_dir: runs/exp_shakespeare_sparse
   seed: 123
   steps: 1000
   log_every: 10
@@ -153,9 +178,11 @@ model:
 attention:
   backend: sparse
   window_size: 64
-  expander_degree: 8
+  expander_degree: 16
   sparse_impl: flex
   sparse_block_size: 128
+  sparse_probe_every: 50
+  sparse_probe_tokens: 256
 
 optim:
   lr: 3e-4
@@ -171,6 +198,9 @@ Orion logs detailed metrics at multiple frequencies:
 **Every 50 Steps:**
 - `vram_peak_mib`, `divergence_rate`, `activation_norm_rms`, `attention_entropy`, `attention_entropy_normalized`
 
+For fused sparse (`sparse_impl: flex`), weight-derived metrics can be `NA`
+unless probe metrics are enabled (`sparse_probe_every > 0`).
+
 **Once Per Run:**
 - `attention_degree`, `compute_proxy_per_token`, `compute_proxy_per_seq`, `compute_proxy_per_step`
 
@@ -179,7 +209,7 @@ Orion logs detailed metrics at multiple frequencies:
 
 **Format:** All metrics logged to `{run_dir}/metrics.jsonl` (JSONL = JSON Lines):
 ```json
-{"type": "run_metrics", "step": 1, "attention_degree": 72, ...}
+{"type": "run", "step": 0, "attention_degree": 80, ...}
 {"type": "step", "step": 1, "loss": 5.73, "ppl": 307.56, ...}
 {"type": "window", "step": 50, "vram_peak_mib": 2048, ...}
 {"type": "eval", "step": 1000, "eval_ppl_512": 12.5, ...}
@@ -203,7 +233,7 @@ orion/
 └── train_utils.py          # Training utilities
 
 configs/                     # Training configurations
-tests/                       # 152 tests (sparse, dense, metrics, models)
+tests/                       # 163 tests (sparse, dense, window, metrics, models)
 runs/                        # Training outputs (checkpoints, metrics)
 ```
 
@@ -242,10 +272,10 @@ seed = ckpt["seed"]
 
 **Run Tests:**
 ```bash
-make test                   # All 149 tests
+make test                   # All tests
 pytest tests/test_sparse_attention.py -v  # Specific file
 pytest --cov=orion tests/   # With coverage
-make smoke                  # Quick 5-step test
+make smoke                  # Quick 20-step test
 ```
 
 ## Development
@@ -258,8 +288,8 @@ make dev                    # Install dev dependencies
 **Commands:**
 ```bash
 make train                  # Full training (configs/golden.yaml)
-make smoke                  # Quick 5-step test
-make test                   # Run all 149 tests
+make smoke                  # Quick 20-step test
+make test                   # Run all tests
 make lint                   # Lint check (ruff)
 make format                 # Auto-format code
 make format-check           # Check formatting
@@ -293,7 +323,7 @@ cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract 
 - Linter: Ruff (E, F, I, B, UP rules)
 - Formatter: Ruff format
 - Type Checking: Full type annotations
-- Tests: 152 tests (sparse, dense, metrics, models)
+- Tests: 163 tests (sparse, dense, window, metrics, models)
 - Python: 3.11+
 
 **CI Pipeline:**
@@ -303,8 +333,8 @@ make test lint format-check  # Local CI (before commit)
 
 GitHub Actions runs on every PR:
 1. Lint & Format checks
-2. Full test suite (152 tests)
-3. Smoke test (5-step training)
+2. Full test suite (163 tests)
+3. Smoke test (20-step training)
 
 ---
 

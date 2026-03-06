@@ -81,6 +81,8 @@ def test_attention_config_defaults():
     assert acfg.expander_degree is None
     assert acfg.sparse_impl == "auto"
     assert acfg.sparse_block_size == 128
+    assert acfg.sparse_probe_every == 0
+    assert acfg.sparse_probe_tokens == 256
 
 
 def test_attention_config_from_yaml():
@@ -137,9 +139,13 @@ def test_attention_config_sparse_impl_and_block_size():
                 "expander_degree": 8,
                 "sparse_impl": "flex",
                 "sparse_block_size": 64,
+                "sparse_probe_every": 25,
+                "sparse_probe_tokens": 192,
             },
         }
     )
     acfg = cfg.attention_config()
     assert acfg.sparse_impl == "flex"
     assert acfg.sparse_block_size == 64
+    assert acfg.sparse_probe_every == 25
+    assert acfg.sparse_probe_tokens == 192
