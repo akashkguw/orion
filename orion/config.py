@@ -69,12 +69,26 @@ class OrionConfig:
         if sparse_block_size is None:
             sparse_block_size = 128
 
+        sparse_probe_every = attention_section.get("sparse_probe_every")
+        if sparse_probe_every is None:
+            sparse_probe_every = model_section.get("sparse_probe_every")
+        if sparse_probe_every is None:
+            sparse_probe_every = 0
+
+        sparse_probe_tokens = attention_section.get("sparse_probe_tokens")
+        if sparse_probe_tokens is None:
+            sparse_probe_tokens = model_section.get("sparse_probe_tokens")
+        if sparse_probe_tokens is None:
+            sparse_probe_tokens = 256
+
         return AttentionConfig(
             backend=str(backend),
             window_size=int(window) if window is not None else None,
             expander_degree=int(expander) if expander is not None else None,
             sparse_impl=str(sparse_impl),
             sparse_block_size=int(sparse_block_size),
+            sparse_probe_every=int(sparse_probe_every),
+            sparse_probe_tokens=int(sparse_probe_tokens),
         )
 
 

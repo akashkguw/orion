@@ -79,10 +79,15 @@ attention:
   expander_degree: 8     # Long-range neighbors
   sparse_impl: flex      # flex-only sparse execution
   sparse_block_size: 128 # Block size for flex backend
+  sparse_probe_every: 50 # Optional: probe cadence for entropy/mass
+  sparse_probe_tokens: 256 # Optional: max tokens for each probe
 ```
 
 `sparse_impl` modes:
 - `flex`: Require fused sparse path (raise if unavailable).
+
+Note: fused `flex` does not expose full attention weights. Orion logs
+`attention_entropy/window_mass/expander_mass` as `NA` unless probe metrics are enabled.
 
 **When to Use:**
 | Scenario | Recommendation |
@@ -156,6 +161,8 @@ attention:
   expander_degree: 8
   sparse_impl: flex
   sparse_block_size: 128
+  sparse_probe_every: 50
+  sparse_probe_tokens: 256
 
 optim:
   lr: 3e-4
@@ -170,6 +177,9 @@ Orion logs detailed metrics at multiple frequencies:
 
 **Every 50 Steps:**
 - `vram_peak_mib`, `divergence_rate`, `activation_norm_rms`, `attention_entropy`, `attention_entropy_normalized`
+
+For fused sparse (`sparse_impl: flex`), weight-derived metrics can be `NA`
+unless probe metrics are enabled (`sparse_probe_every > 0`).
 
 **Once Per Run:**
 - `attention_degree`, `compute_proxy_per_token`, `compute_proxy_per_seq`, `compute_proxy_per_step`

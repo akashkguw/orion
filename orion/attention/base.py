@@ -18,6 +18,10 @@ class AttentionConfig:
     sparse_impl: str = "auto"
     # Block size used by torch flex_attention block masks
     sparse_block_size: int = 128
+    # Optional probe metrics for fused sparse path:
+    # every N forward calls, run a small gather probe to estimate entropy/mass.
+    sparse_probe_every: int = 0
+    sparse_probe_tokens: int = 256
 
 
 class AttentionBackend(Protocol):

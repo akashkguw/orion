@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import time
 from pathlib import Path
@@ -37,6 +38,17 @@ def _find_attention_backends(model: torch.nn.Module):
         if sparse_backend is not None and dense_backend is not None:
             break
     return sparse_backend, dense_backend
+
+
+def _format_metric_or_na(value: object, *, fmt: str, suffix: str = "") -> str:
+    """Format numeric metric values; return 'NA' for unavailable values."""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "NA"
+    if not math.isfinite(numeric):
+        return "NA"
+    return f"{numeric:{fmt}}{suffix}"
 
 
 def train(
@@ -239,13 +251,13 @@ def train(
             activation_norm = float(torch.sqrt((r.float() ** 2).mean()).item())
 
             # Get attention metrics from the first layer's attention backend
-            attention_entropy = 0.0
-            attention_entropy_normalized = 0.0
+            attention_entropy = float("nan")
+            attention_entropy_normalized = float("nan")
             valid_neighbor_fraction = 0.0
             valid_neighbor_fraction_causal_cap = 0.0
             valid_neighbor_fraction_vs_causal_cap = 0.0
-            attention_mass_window_pct = 0.0
-            attention_mass_expander_pct = 0.0
+            attention_mass_window_pct = float("nan")
+            attention_mass_expander_pct = float("nan")
             total_neighbor_slots = 0
             valid_neighbor_slots = 0
             invalid_neighbor_slots = 0
@@ -258,9 +270,9 @@ def train(
 
                 # Try sparse first
                 if sparse_backend is not None:
-                    attention_entropy = getattr(sparse_backend, "last_attn_entropy", 0.0)
+                    attention_entropy = getattr(sparse_backend, "last_attn_entropy", float("nan"))
                     attention_entropy_normalized = getattr(
-                        sparse_backend, "last_attn_entropy_normalized", 0.0
+                        sparse_backend, "last_attn_entropy_normalized", float("nan")
                     )
                     valid_neighbor_fraction = getattr(
                         sparse_backend, "last_valid_neighbor_fraction", 0.0
@@ -272,10 +284,10 @@ def train(
                         sparse_backend, "last_valid_neighbor_fraction_vs_causal_cap", 0.0
                     )
                     attention_mass_window_pct = getattr(
-                        sparse_backend, "last_attention_mass_window_pct", 0.0
+                        sparse_backend, "last_attention_mass_window_pct", float("nan")
                     )
                     attention_mass_expander_pct = getattr(
-                        sparse_backend, "last_attention_mass_expander_pct", 0.0
+                        sparse_backend, "last_attention_mass_expander_pct", float("nan")
                     )
                     total_neighbor_slots = int(
                         getattr(sparse_backend, "last_total_neighbor_slots", 0)
@@ -294,9 +306,9 @@ def train(
                     )
                 # Fall back to dense
                 elif dense_backend is not None:
-                    attention_entropy = getattr(dense_backend, "last_attn_entropy", 0.0)
+                    attention_entropy = getattr(dense_backend, "last_attn_entropy", float("nan"))
                     attention_entropy_normalized = getattr(
-                        dense_backend, "last_attn_entropy_normalized", 0.0
+                        dense_backend, "last_attn_entropy_normalized", float("nan")
                     )
             except (AttributeError, IndexError, TypeError) as e:
                 print(f"Warning: exception in attention metrics reading: {type(e).__name__}: {e}")
@@ -327,18 +339,28 @@ def train(
             logger.log(window_payload)
 
             # Print window metrics summary
+            attention_entropy_str = _format_metric_or_na(attention_entropy, fmt=".4f")
+            attention_entropy_norm_str = _format_metric_or_na(
+                attention_entropy_normalized, fmt=".4f"
+            )
             print(
                 f"  Window {step}: vram={vram_peak_mib}MB, "
                 f"div_rate={window_metrics.divergence_rate:.3f}, "
                 f"act_norm={activation_norm:.4f}, "
-                f"attn_ent={attention_entropy:.4f} (norm={attention_entropy_normalized:.4f}), "
+                f"attn_ent={attention_entropy_str} (norm={attention_entropy_norm_str}), "
                 f"clip_rate={window_metrics.clip_rate:.3f}"
             )
             if valid_neighbor_fraction > 0:
+                window_mass_str = _format_metric_or_na(
+                    attention_mass_window_pct, fmt=".1f", suffix="%"
+                )
+                expander_mass_str = _format_metric_or_na(
+                    attention_mass_expander_pct, fmt=".1f", suffix="%"
+                )
                 print(
                     f"    Sparse: valid_neighbors={valid_neighbor_fraction:.3f}, "
-                    f"window_mass={attention_mass_window_pct:.1f}%, "
-                    f"expander_mass={attention_mass_expander_pct:.1f}%"
+                    f"window_mass={window_mass_str}, "
+                    f"expander_mass={expander_mass_str}"
                 )
                 if valid_neighbor_fraction_causal_cap > 0:
                     print(
