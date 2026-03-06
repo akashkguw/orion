@@ -20,11 +20,13 @@ class TinyDecoderOnly(nn.Module):
             activation="gelu",
             norm_first=True,
         )
-        self.blocks = nn.TransformerEncoder(layer, num_layers=n_layers)
+        self.blocks = nn.TransformerEncoder(layer, num_layers=n_layers, enable_nested_tensor=False)
         self.ln = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, vocab_size, bias=False)
 
-    def forward(self, idx: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, idx: torch.Tensor, return_residual: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         # idx: [B, T]
         b, t = idx.shape
         device = idx.device
@@ -34,6 +36,9 @@ class TinyDecoderOnly(nn.Module):
         x = self.blocks(x, mask=causal)
         x = self.ln(x)
         logits = self.head(x)  # [B, T, V]
+
+        if return_residual:
+            return logits, x  # Return logits and residual stream (after ln)
         return logits
 
 

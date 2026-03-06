@@ -1,7 +1,9 @@
 import json
+import random
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from orion.logging_utils import JsonlLogger
@@ -108,22 +110,33 @@ def test_checkpoint_structure():
         ckpt = {
             "model": model.state_dict(),
             "opt": optimizer.state_dict(),
+            "scheduler": None,
             "step": 100,
+            "epoch": 100,
             "seed": 42,
             "config": {"model": {"d_model": d_model}},
+            "rng_state": {
+                "python": random.getstate(),
+                "numpy": np.random.get_state(),
+                "torch": torch.random.get_rng_state(),
+            },
         }
         torch.save(ckpt, ckpt_path)
 
         # Load and verify
-        loaded = torch.load(ckpt_path)
+        loaded = torch.load(ckpt_path, weights_only=False)
 
         assert "model" in loaded
         assert "opt" in loaded
         assert "step" in loaded
+        assert "epoch" in loaded
         assert "seed" in loaded
         assert "config" in loaded
+        assert "rng_state" in loaded
+        assert "scheduler" in loaded
 
         assert isinstance(loaded["step"], int)
+        assert isinstance(loaded["epoch"], int)
         assert isinstance(loaded["seed"], int)
         assert isinstance(loaded["config"], dict)
 
@@ -149,7 +162,7 @@ def test_checkpoint_model_state_dict():
         ckpt = {"model": model.state_dict()}
         torch.save(ckpt, ckpt_path)
 
-        loaded = torch.load(ckpt_path)
+        loaded = torch.load(ckpt_path, weights_only=False)
         model2 = TinyDecoderOnly(
             vocab_size=vocab_size,
             d_model=d_model,

@@ -79,6 +79,8 @@ def test_attention_config_defaults():
     assert acfg.backend == "dense"
     assert acfg.window_size is None
     assert acfg.expander_degree is None
+    assert acfg.sparse_impl == "auto"
+    assert acfg.sparse_block_size == 128
 
 
 def test_attention_config_from_yaml():
@@ -93,3 +95,51 @@ def test_attention_config_from_yaml():
     assert acfg.backend == "sparse"
     assert acfg.window_size == 64
     assert acfg.expander_degree == 4
+
+
+def test_attention_config_from_legacy_model_keys():
+    """Legacy model.attention_type fields are still supported."""
+    cfg = OrionConfig(
+        {
+            "run": {"out_dir": "/tmp"},
+            "model": {"attention_type": "window", "window_size": "32", "expander_degree": "6"},
+        }
+    )
+    acfg = cfg.attention_config()
+    assert acfg.backend == "window"
+    assert acfg.window_size == 32
+    assert acfg.expander_degree == 6
+
+
+def test_attention_config_attention_section_precedence_over_legacy_model_keys():
+    """Top-level attention section wins over legacy model.* keys when both exist."""
+    cfg = OrionConfig(
+        {
+            "run": {"out_dir": "/tmp"},
+            "model": {"attention_type": "dense", "window_size": 4, "expander_degree": 1},
+            "attention": {"backend": "sparse", "window_size": 64, "expander_degree": 8},
+        }
+    )
+    acfg = cfg.attention_config()
+    assert acfg.backend == "sparse"
+    assert acfg.window_size == 64
+    assert acfg.expander_degree == 8
+
+
+def test_attention_config_sparse_impl_and_block_size():
+    """Parses sparse implementation controls."""
+    cfg = OrionConfig(
+        {
+            "run": {"out_dir": "/tmp"},
+            "attention": {
+                "backend": "sparse",
+                "window_size": 64,
+                "expander_degree": 8,
+                "sparse_impl": "flex",
+                "sparse_block_size": 64,
+            },
+        }
+    )
+    acfg = cfg.attention_config()
+    assert acfg.sparse_impl == "flex"
+    assert acfg.sparse_block_size == 64

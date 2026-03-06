@@ -7,10 +7,13 @@ from typing import Any
 
 
 class JsonlLogger:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, wall_time_offset: float | None = None):
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._t0 = time.time()
+        if wall_time_offset is None:
+            self._t0 = time.time()
+        else:
+            self._t0 = time.time() - wall_time_offset
 
     def log(self, row: dict[str, Any]) -> None:
         row = dict(row)

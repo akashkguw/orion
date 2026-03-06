@@ -1,9 +1,9 @@
 run:
-  out_dir: runs/exp_shakespeare_dense
+  out_dir: runs/exp_shakespeare_sparse
   seed: 123
-  steps: 200
-  log_every: 10
-  save_every: 200
+  steps: 2000
+  log_every: 50
+  save_every: 2000
 
 data:
   dataset: tinyshakespeare
@@ -12,7 +12,7 @@ data:
   batch_size: 16
 
 model:
-  name: tiny
+  name: orion
   d_model: 256
   n_layers: 4
   n_heads: 4
@@ -20,5 +20,7 @@ model:
   
 attention:
   backend: sparse
-  window_size: 256
+  window_size: 64
   expander_degree: 16
+  sparse_impl: flex
+  sparse_block_size: 128

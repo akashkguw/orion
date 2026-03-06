@@ -2,9 +2,135 @@ from __future__ import annotations
 
 import torch
 
-from .config import load_config
+from .config import OrionConfig, load_config
 from .model import loss_fn
 from .models_factory import build_model
+
+
+def _infer_vocab_size_from_state_dict(state_dict: dict[str, torch.Tensor]) -> int | None:
+    """Infer vocab size from common embedding/head parameters."""
+    for key in ("head.weight", "tok_emb.weight", "tok.weight"):
+        tensor = state_dict.get(key)
+        if isinstance(tensor, torch.Tensor) and tensor.ndim >= 2:
+            return int(tensor.shape[0])
+    return None
+
+
+def _resolve_vocab_size(cfg: OrionConfig, ckpt: dict) -> int:
+    """Prefer checkpoint vocab size to avoid eval-time shape mismatches."""
+    cfg_vocab = cfg.get("data", "vocab_size", default=None)
+    cfg_vocab_size = int(cfg_vocab) if cfg_vocab is not None else None
+
+    model_state = ckpt.get("model")
+    if isinstance(model_state, dict):
+        ckpt_vocab_size = _infer_vocab_size_from_state_dict(model_state)
+        if ckpt_vocab_size is not None:
+            return ckpt_vocab_size
+
+    if cfg_vocab_size is not None:
+        return cfg_vocab_size
+    return 256
+
+
+@torch.no_grad()
+def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict[str, float]:
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+
+    # Use the config saved at training time for model architecture so the
+    # model we build exactly matches the checkpoint — not the current yaml,
+    # which may differ (e.g. name changed from "tiny" to "orion").
+    if "config" in ckpt:
+        model_cfg = OrionConfig(raw=ckpt["config"])
+    else:
+        model_cfg = cfg
+
+    vocab_size = _resolve_vocab_size(model_cfg, ckpt)
+
+    # Eval batch params can still come from the current yaml (they don't affect weights)
+    seq_len    = int(cfg.get("data", "seq_len",   default=128))
+    batch_size = int(cfg.get("data", "batch_size", default=8))
+
+    d_model  = int(model_cfg.get("model", "d_model",  default=128))
+    n_layers = int(model_cfg.get("model", "n_layers", default=2))
+    n_heads  = int(model_cfg.get("model", "n_heads",  default=4))
+    mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
+
+    model_name    = str(model_cfg.get("model", "name", default="tiny"))
+    attention_cfg = model_cfg.attention_config()
+
+    model = build_model(
+        name=model_name,
+        vocab_size=vocab_size,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        mlp_mult=mlp_mult,
+        device=device,
+        attention_cfg=attention_cfg,
+    )
+
+    model.load_state_dict(ckpt["model"], strict=True)
+    model.eval()
+
+    x = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+    y = torch.roll(x, shifts=-1, dims=1)
+    logits = model(x)
+    loss = loss_fn(logits, y)
+    ppl = float(torch.exp(loss).clamp(max=1e6).item())
+    return {"loss": float(loss.item()), "ppl": ppl}
+
+
+@torch.no_grad()
+def evaluate_long_context(
+    cfg: OrionConfig, *, checkpoint: str, device: torch.device
+) -> dict[str, float]:
+    """Evaluate model at multiple context lengths (512, 1024, 2048, 4096).
+
+    Returns:
+        Dictionary with eval_ppl_512, eval_ppl_1024, eval_ppl_2048, eval_ppl_4096
+    """
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+
+    if "config" in ckpt:
+        model_cfg = OrionConfig(raw=ckpt["config"])
+    else:
+        model_cfg = cfg
+
+    vocab_size = _resolve_vocab_size(model_cfg, ckpt)
+    batch_size = int(cfg.get("data", "batch_size", default=8))
+
+    d_model  = int(model_cfg.get("model", "d_model",  default=128))
+    n_layers = int(model_cfg.get("model", "n_layers", default=2))
+    n_heads  = int(model_cfg.get("model", "n_heads",  default=4))
+    mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
+
+    model_name    = str(model_cfg.get("model", "name", default="tiny"))
+    attention_cfg = model_cfg.attention_config()
+
+    model = build_model(
+        name=model_name,
+        vocab_size=vocab_size,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        mlp_mult=mlp_mult,
+        device=device,
+        attention_cfg=attention_cfg,
+    )
+
+    model.load_state_dict(ckpt["model"], strict=True)
+    model.eval()
+
+    results = {}
+    for context_len in [512, 1024, 2048, 4096]:
+        x = torch.randint(0, vocab_size, (batch_size, context_len), device=device)
+        y = torch.roll(x, shifts=-1, dims=1)
+        logits = model(x)
+        loss = loss_fn(logits, y)
+        ppl = float(torch.exp(loss).clamp(max=1e6).item())
+        results[f"eval_ppl_{context_len}"] = ppl
+
+    return results
 
 
 @torch.no_grad()
@@ -19,40 +145,7 @@ def main():
 
     cfg = load_config(args.config)
     device = torch.device(args.device)
-
-    vocab_size = int(cfg.get("data", "vocab_size", default=256))
-    seq_len = int(cfg.get("data", "seq_len", default=128))
-    batch_size = int(cfg.get("data", "batch_size", default=8))
-
-    d_model = int(cfg.get("model", "d_model", default=128))
-    n_layers = int(cfg.get("model", "n_layers", default=2))
-    n_heads = int(cfg.get("model", "n_heads", default=4))
-    mlp_mult = int(cfg.get("model", "mlp_mult", default=4))
-
-    model_name = str(cfg.get("model", "name", default="tiny"))
-    attention_cfg = cfg.attention_config()
-
-    model = build_model(
-        name=model_name,
-        vocab_size=vocab_size,
-        d_model=d_model,
-        n_layers=n_layers,
-        n_heads=n_heads,
-        mlp_mult=mlp_mult,
-        device=device,
-        attention_cfg=attention_cfg,
-    )
-
-    ckpt = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(ckpt["model"], strict=True)
-    model.eval()
-
-    x = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
-    y = torch.roll(x, shifts=-1, dims=1)
-    logits = model(x)
-    loss = loss_fn(logits, y)
-    ppl = float(torch.exp(loss).clamp(max=1e6).item())
-    print({"loss": float(loss.item()), "ppl": ppl})
+    print(evaluate(cfg, checkpoint=args.checkpoint, device=device))
 
 
 if __name__ == "__main__":

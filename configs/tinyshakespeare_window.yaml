@@ -12,7 +12,7 @@ data:
   batch_size: 16
 
 model:
-  name: tiny
+  name: orion
   d_model: 256
   n_layers: 6
   n_heads: 8

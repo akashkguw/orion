@@ -9,9 +9,15 @@ import torch
 @dataclass(frozen=True)
 class AttentionConfig:
     backend: str  # "dense" | "window" | "sparse"
-    window_size: int | None = None  # W
-    expander_degree: int | None = None  # d
-    # add fields as needed (dropout, qk_norm toggle, etc.)
+    window_size: int | None = None  # W (local window size)
+    expander_degree: int | None = None  # d (number of long-range expander neighbors)
+    # Sparse backend implementation:
+    # - "auto": use fused sparse kernel when available, else gather path
+    # - "gather": always use explicit gather/scatter sparse path
+    # - "flex": require fused sparse kernel path
+    sparse_impl: str = "auto"
+    # Block size used by torch flex_attention block masks
+    sparse_block_size: int = 128
 
 
 class AttentionBackend(Protocol):

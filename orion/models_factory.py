@@ -44,8 +44,19 @@ class OrionDecoder(nn.Module):
         self.ln_f = nn.LayerNorm(d_model)  # final norm before output head
         self.head = nn.Linear(d_model, vocab_size, bias=False)  # bias=False: redundant with LN
 
-    def forward(self, idx: torch.Tensor) -> torch.Tensor:
-        """idx: [B, T] token IDs → logits: [B, T, vocab_size]"""
+    def forward(
+        self, idx: torch.Tensor, return_residual: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """idx: [B, T] token IDs → logits: [B, T, vocab_size]
+
+        Args:
+            idx: Token IDs [B, T]
+            return_residual: If True, return (logits, residual_stream)
+
+        Returns:
+            logits: [B, T, vocab_size]
+            residual (optional): Residual stream after final norm [B, T, D]
+        """
         _B, T = idx.shape
 
         tok = self.tok_emb(idx)
@@ -56,7 +67,11 @@ class OrionDecoder(nn.Module):
             x = block(x)
 
         x = self.ln_f(x)
-        return self.head(x)
+        logits = self.head(x)
+
+        if return_residual:
+            return logits, x  # Return logits and residual stream (after ln)
+        return logits
 
 
 def build_model(
