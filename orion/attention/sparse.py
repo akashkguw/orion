@@ -55,36 +55,40 @@ def build_sparse_indices(
     indices_list = []
 
     for q in range(n):
-        # 1. Local window: [q-window_size, ..., q-1, q]
+        # 1) Local window is always present and causal.
         window_start = max(0, q - window_size + 1)
         window_neighbors = list(range(window_start, q + 1))
         neighbors_list = list(window_neighbors)
         neighbors_set = set(window_neighbors)
 
-        # 2. Expander edges using modular arithmetic with per-head offset
-        if n > 1:
-            mod = n  # Full-range modulus for better coverage
-            head_offset = (head_idx * 7) % mod  # Prime-like multiplier for variation
-
+        # 2) Expander edges:
+        #    - strictly causal (k <= q-1)
+        #    - never self (offset >= 1)
+        #    - deterministic head-specific variation
+        if expander_degree > 0 and q > 0:
+            m = q  # number of strictly-past positions available
+            head_offset = ((head_idx * 7) + (head_idx * head_idx * 13)) % m
             for s in range(1, expander_degree + 1):
-                offset = ((s * s) + head_offset) % mod
-                k = q - offset
-                # Deduplicate against both window and previously added expander keys.
-                if k >= 0 and k not in neighbors_set:
+                offset = ((s * s) + head_offset + (3 * s * head_idx)) % m
+                offset += 1  # force offset in [1, q]
+                k = q - offset  # now guaranteed in [0, q-1]
+                if k not in neighbors_set:
                     neighbors_list.append(k)
                     neighbors_set.add(k)
+                if len(neighbors_list) >= target_degree:
+                    break
 
-        # Refill strategy: pad with additional window positions if needed
+        # 3) Refill from older causal positions if expander produced collisions.
+        #    Walk from just before the local window backwards to keep recency bias.
         if len(neighbors_list) < target_degree:
-            refill_start = max(0, q - window_size - expander_degree)
-            refill_end = max(0, q - window_size + 1)
-
-            for i in range(refill_start, refill_end):
-                if i not in neighbors_set and len(neighbors_list) < target_degree:
+            for i in range(window_start - 1, -1, -1):
+                if i not in neighbors_set:
                     neighbors_list.append(i)
                     neighbors_set.add(i)
+                if len(neighbors_list) >= target_degree:
+                    break
 
-        # Truncate to exact degree and pad with -1 (invalid)
+        # 4) Pad with -1 when causal history has fewer than target_degree entries.
         neighbors_list = neighbors_list[:target_degree]
         while len(neighbors_list) < target_degree:
             neighbors_list.append(-1)
@@ -119,6 +123,7 @@ class SparseAttention:
         self.sparse_impl = (cfg.sparse_impl or "auto").lower()
         self.sparse_block_size = max(16, int(cfg.sparse_block_size or 128))
         self.indices_cache: dict[tuple, torch.Tensor] = {}
+        self.indices_per_head_cache: dict[tuple, torch.Tensor] = {}
         self.block_mask_cache: dict[tuple, torch.Tensor] = {}
         self._fused_attention_fn = None
         self._warned_fallback = False
@@ -158,6 +163,15 @@ class SparseAttention:
                 n, self.window_size, self.expander_degree, h, device
             )
         return self.indices_cache[cache_key]
+
+    def _get_indices_per_head(self, *, T: int, H: int, device: torch.device) -> torch.Tensor:
+        """Get stacked sparse indices [H, T, degree], cached by shape/head/device."""
+        cache_key = (T, H, self.window_size, self.expander_degree, str(device))
+        if cache_key not in self.indices_per_head_cache:
+            self.indices_per_head_cache[cache_key] = torch.stack(
+                [self._get_indices(T, h, device) for h in range(H)], dim=0
+            )
+        return self.indices_per_head_cache[cache_key]
 
     def _compute_index_diagnostics(self, indices_per_head: torch.Tensor) -> None:
         """Compute structural diagnostics for sparse index quality.
@@ -230,23 +244,6 @@ class SparseAttention:
             return False
         return True
 
-    def _build_sparse_adjacency(
-        self, indices_per_head: torch.Tensor, H: int, T: int, device: torch.device
-    ) -> torch.Tensor:
-        """Build dense [H, T, T] boolean adjacency from sparse neighbor indices."""
-        degree = indices_per_head.shape[-1]
-        adjacency = torch.zeros((H, T, T), dtype=torch.bool, device=device)
-        valid = indices_per_head >= 0
-        if valid.any():
-            h_idx = torch.arange(H, device=device, dtype=torch.long)[:, None, None].expand(
-                H, T, degree
-            )
-            q_idx = torch.arange(T, device=device, dtype=torch.long)[None, :, None].expand(
-                H, T, degree
-            )
-            adjacency[h_idx[valid], q_idx[valid], indices_per_head[valid]] = True
-        return adjacency
-
     def _get_fused_block_mask(
         self, *, H: int, T: int, device: torch.device, indices_per_head: torch.Tensor
     ) -> torch.Tensor:
@@ -262,10 +259,12 @@ class SparseAttention:
         if cache_key in self.block_mask_cache:
             return self.block_mask_cache[cache_key]
 
-        adjacency = self._build_sparse_adjacency(indices_per_head, H, T, device)
+        neighbors = indices_per_head  # [H, T, degree]
 
         def mask_mod(b, h, q_idx, kv_idx):
-            return adjacency[h, q_idx, kv_idx]
+            row = neighbors[h, q_idx]  # [..., degree]
+            valid = row >= 0
+            return ((row == kv_idx[..., None]) & valid).any(dim=-1)
 
         block_mask = create_block_mask(
             mask_mod,
@@ -409,8 +408,8 @@ class SparseAttention:
         _, H, T, _ = q.shape
         device = q.device
 
-        # Build indices for each head (per-head variation) once per forward.
-        indices_per_head = torch.stack([self._get_indices(T, h, device) for h in range(H)], dim=0)
+        # Build indices for each head (per-head variation), cached.
+        indices_per_head = self._get_indices_per_head(T=T, H=H, device=device)
         self._compute_index_diagnostics(indices_per_head)
 
         if self._supports_fused_sparse(q, attn_mask):

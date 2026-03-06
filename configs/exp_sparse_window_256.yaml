@@ -23,6 +23,8 @@ attention:
   backend: sparse
   window_size: 256
   expander_degree: 16
+  sparse_impl: flex
+  sparse_block_size: 128
 
 optim:
   lr: 3e-4

@@ -22,3 +22,5 @@ attention:
   backend: sparse
   window_size: 64
   expander_degree: 16
+  sparse_impl: flex
+  sparse_block_size: 128
