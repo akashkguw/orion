@@ -34,18 +34,29 @@ def _resolve_vocab_size(cfg: OrionConfig, ckpt: dict) -> int:
 
 @torch.no_grad()
 def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict[str, float]:
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+
+    # Use the config saved at training time for model architecture so the
+    # model we build exactly matches the checkpoint — not the current yaml,
+    # which may differ (e.g. name changed from "tiny" to "orion").
+    if "config" in ckpt:
+        model_cfg = OrionConfig(raw=ckpt["config"])
+    else:
+        model_cfg = cfg
+
+    vocab_size = _resolve_vocab_size(model_cfg, ckpt)
+
+    # Eval batch params can still come from the current yaml (they don't affect weights)
     seq_len = int(cfg.get("data", "seq_len", default=128))
     batch_size = int(cfg.get("data", "batch_size", default=8))
 
-    d_model = int(cfg.get("model", "d_model", default=128))
-    n_layers = int(cfg.get("model", "n_layers", default=2))
-    n_heads = int(cfg.get("model", "n_heads", default=4))
-    mlp_mult = int(cfg.get("model", "mlp_mult", default=4))
+    d_model = int(model_cfg.get("model", "d_model", default=128))
+    n_layers = int(model_cfg.get("model", "n_layers", default=2))
+    n_heads = int(model_cfg.get("model", "n_heads", default=4))
+    mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
 
-    model_name = str(cfg.get("model", "name", default="tiny"))
-    attention_cfg = cfg.attention_config()
-    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
-    vocab_size = _resolve_vocab_size(cfg, ckpt)
+    model_name = str(model_cfg.get("model", "name", default="tiny"))
+    attention_cfg = model_cfg.attention_config()
 
     model = build_model(
         name=model_name,
@@ -75,25 +86,26 @@ def evaluate_long_context(
 ) -> dict[str, float]:
     """Evaluate model at multiple context lengths (512, 1024, 2048, 4096).
 
-    Args:
-        cfg: Configuration
-        checkpoint: Path to checkpoint
-        device: Device to evaluate on
-
     Returns:
         Dictionary with eval_ppl_512, eval_ppl_1024, eval_ppl_2048, eval_ppl_4096
     """
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+
+    if "config" in ckpt:
+        model_cfg = OrionConfig(raw=ckpt["config"])
+    else:
+        model_cfg = cfg
+
+    vocab_size = _resolve_vocab_size(model_cfg, ckpt)
     batch_size = int(cfg.get("data", "batch_size", default=8))
 
-    d_model = int(cfg.get("model", "d_model", default=128))
-    n_layers = int(cfg.get("model", "n_layers", default=2))
-    n_heads = int(cfg.get("model", "n_heads", default=4))
-    mlp_mult = int(cfg.get("model", "mlp_mult", default=4))
+    d_model = int(model_cfg.get("model", "d_model", default=128))
+    n_layers = int(model_cfg.get("model", "n_layers", default=2))
+    n_heads = int(model_cfg.get("model", "n_heads", default=4))
+    mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
 
-    model_name = str(cfg.get("model", "name", default="tiny"))
-    attention_cfg = cfg.attention_config()
-    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
-    vocab_size = _resolve_vocab_size(cfg, ckpt)
+    model_name = str(model_cfg.get("model", "name", default="tiny"))
+    attention_cfg = model_cfg.attention_config()
 
     model = build_model(
         name=model_name,

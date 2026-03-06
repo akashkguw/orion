@@ -1,9 +1,9 @@
 run:
   out_dir: runs/exp_shakespeare_sparse
   seed: 123
-  steps: 200
-  log_every: 10
-  save_every: 200
+  steps: 2000
+  log_every: 50
+  save_every: 2000
 
 data:
   dataset: tinyshakespeare

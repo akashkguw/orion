@@ -57,6 +57,7 @@ def train(
     device: torch.device,
     resume_path: Path | None = None,
     save_every_override: int | None = None,
+    steps_override: int | None = None,
 ) -> None:
     dataset = str(cfg.get("data", "dataset", default="toy")).lower()
     data_root = str(cfg.get("data", "root", default="data"))
@@ -76,6 +77,8 @@ def train(
     mlp_mult = int(cfg.get("model", "mlp_mult", default=4))
 
     steps = int(cfg.get("run", "steps", default=50))
+    if steps_override is not None:
+        steps = int(steps_override)
     log_every = int(cfg.get("run", "log_every", default=1))
     save_every = int(cfg.get("run", "save_every", default=steps))
     if save_every_override is not None:
