@@ -47,15 +47,15 @@ def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict
     vocab_size = _resolve_vocab_size(model_cfg, ckpt)
 
     # Eval batch params can still come from the current yaml (they don't affect weights)
-    seq_len    = int(cfg.get("data", "seq_len",   default=128))
+    seq_len = int(cfg.get("data", "seq_len", default=128))
     batch_size = int(cfg.get("data", "batch_size", default=8))
 
-    d_model  = int(model_cfg.get("model", "d_model",  default=128))
+    d_model = int(model_cfg.get("model", "d_model", default=128))
     n_layers = int(model_cfg.get("model", "n_layers", default=2))
-    n_heads  = int(model_cfg.get("model", "n_heads",  default=4))
+    n_heads = int(model_cfg.get("model", "n_heads", default=4))
     mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
 
-    model_name    = str(model_cfg.get("model", "name", default="tiny"))
+    model_name = str(model_cfg.get("model", "name", default="tiny"))
     attention_cfg = model_cfg.attention_config()
 
     model = build_model(
@@ -99,12 +99,12 @@ def evaluate_long_context(
     vocab_size = _resolve_vocab_size(model_cfg, ckpt)
     batch_size = int(cfg.get("data", "batch_size", default=8))
 
-    d_model  = int(model_cfg.get("model", "d_model",  default=128))
+    d_model = int(model_cfg.get("model", "d_model", default=128))
     n_layers = int(model_cfg.get("model", "n_layers", default=2))
-    n_heads  = int(model_cfg.get("model", "n_heads",  default=4))
+    n_heads = int(model_cfg.get("model", "n_heads", default=4))
     mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
 
-    model_name    = str(model_cfg.get("model", "name", default="tiny"))
+    model_name = str(model_cfg.get("model", "name", default="tiny"))
     attention_cfg = model_cfg.attention_config()
 
     model = build_model(
