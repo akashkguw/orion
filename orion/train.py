@@ -390,15 +390,21 @@ def train(
         if step % 1000 == 0:
             from .eval import evaluate_long_context
 
-            eval_results = evaluate_long_context(
-                cfg, checkpoint=str(out_dir / "checkpoint.pt"), device=device
-            )
+            try:
+                eval_results = evaluate_long_context(
+                    cfg, checkpoint=str(out_dir / "checkpoint.pt"), device=device
+                )
+            except Exception as exc:
+                print(
+                    f"Warning: long-context eval failed at step {step}: {type(exc).__name__}: {exc}"
+                )
+                eval_results = {}
             eval_metrics = metrics_tracker.record_eval_metrics(
                 step=step,
-                eval_ppl_512=eval_results.get("eval_ppl_512", 0.0),
-                eval_ppl_1024=eval_results.get("eval_ppl_1024", 0.0),
-                eval_ppl_2048=eval_results.get("eval_ppl_2048", 0.0),
-                eval_ppl_4096=eval_results.get("eval_ppl_4096", 0.0),
+                eval_ppl_512=eval_results.get("eval_ppl_512", float("nan")),
+                eval_ppl_1024=eval_results.get("eval_ppl_1024", float("nan")),
+                eval_ppl_2048=eval_results.get("eval_ppl_2048", float("nan")),
+                eval_ppl_4096=eval_results.get("eval_ppl_4096", float("nan")),
             )
             logger.log({"type": "eval", **metrics_to_dict(eval_metrics)})
 
