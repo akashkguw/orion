@@ -41,14 +41,14 @@ class WindowAttention:
         _B, _H, T, _Dh = q.shape
         cache_key = (T, q.device, q.dtype)
         if cache_key not in self._mask_cache:
-            self._mask_cache[cache_key] = _build_window_mask(T, self.W, device=q.device, dtype=q.dtype)
+            self._mask_cache[cache_key] = _build_window_mask(
+                T, self.W, device=q.device, dtype=q.dtype
+            )
         mask = self._mask_cache[cache_key]
         return F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
 
-def _build_window_mask(
-    T: int, W: int, *, device: torch.device, dtype: torch.dtype
-) -> torch.Tensor:
+def _build_window_mask(T: int, W: int, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
     """Build a [1, 1, T, T] additive attention mask for causal sliding-window attention.
 
     Position i attends to j iff:
@@ -61,8 +61,8 @@ def _build_window_mask(
     rows = torch.arange(T, device=device).unsqueeze(1)  # [T, 1] — query positions
     cols = torch.arange(T, device=device).unsqueeze(0)  # [1, T] — key positions
 
-    causal    = cols <= rows          # j <= i: no future tokens
-    in_window = (rows - cols) < W    # i - j < W: within sliding window
+    causal = cols <= rows  # j <= i: no future tokens
+    in_window = (rows - cols) < W  # i - j < W: within sliding window
 
     allowed = causal & in_window
 
