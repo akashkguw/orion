@@ -147,7 +147,7 @@ Unavailable metrics are logged/printed as `NA` rather than misleading zeros.
 
 ## Config-First Experiment Framework
 
-The notebook workflow is config-driven.
+The experiment workflow is config-driven, with execution handled by `orion.experiments`.
 
 ### Experiment structure
 
@@ -169,7 +169,24 @@ Open [`experiment.ipynb`](./experiment.ipynb), then set:
 PROFILE = "pilot9"  # or pilot, full, pilot_norm
 ```
 
-The notebook loads trial specs from profile + variant YAMLs, executes runs, and produces paired analysis/plots.
+The notebook is intentionally thin:
+- it selects a profile
+- calls `orion.experiments.run_profile(PROFILE)`
+- reads `summary.csv`
+- runs paired analysis/plots
+
+All sweep knobs live in profile YAML (`runner.*`, `analysis.*`, `variants[]`).
+
+### Run from CLI (no notebook)
+
+```bash
+python -m orion.experiments --profile pilot9
+```
+
+This writes:
+- `runs/<experiment_id>/summary.csv`
+- `runs/<experiment_id>/hardware_meta.json`
+- `configs/generated/<experiment_id>/<trial_id>/config.yaml`
 
 ## Training, Evaluation, and Run Orchestration
 
