@@ -18,7 +18,13 @@ def _tiny_attention_cfg():
 
 
 def _tiny_sparse_cfg():
-    return AttentionConfig(backend="sparse", window_size=4, expander_degree=2, sparse_impl="gather")
+    sparse_impl = "flex" if torch.cuda.is_available() else "auto"
+    return AttentionConfig(
+        backend="sparse",
+        window_size=4,
+        expander_degree=2,
+        sparse_impl=sparse_impl,
+    )
 
 
 def _build_orion(stability_cfg=None, attention_cfg=None, d_model=32, n_heads=4, n_layers=2):

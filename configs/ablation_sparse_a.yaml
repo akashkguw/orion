@@ -19,6 +19,6 @@ attention:
   backend: sparse
   window_size: 32
   expander_degree: 8
-  sparse_impl: gather
+  sparse_impl: flex
 optim:
   lr: 3e-4
