@@ -40,6 +40,7 @@ checkpoints/
 wandb/
 tensorboard/
 mlruns/
+orion/local_attention_viz/
 
 # Data (keep local by default)
 /data/
@@ -57,4 +58,3 @@ mlruns/
 *.pem
 id_rsa
 id_ed25519
-
