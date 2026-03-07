@@ -656,11 +656,11 @@ class TestSparseAttentionEdgeCases:
         with pytest.raises(RuntimeError, match="sparse_impl='flex' requested"):
             _ = attn.forward(q, k, v)
 
-    def test_sparse_impl_gather_forces_reference_path(self):
-        """Explicit gather impl should keep metrics available."""
+    def test_sparse_impl_auto_uses_reference_path_when_fused_is_unavailable(self):
+        """Auto impl on CPU should use reference path and keep metrics available."""
         B, H, T, Dh = 1, 2, 16, 8
         cfg = AttentionConfig(
-            backend="sparse", window_size=8, expander_degree=4, sparse_impl="gather"
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
         )
         attn = SparseAttention(cfg)
 

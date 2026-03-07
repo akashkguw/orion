@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import pytest
 import torch
 
 import orion.eval as eval_mod
@@ -93,6 +94,10 @@ def test_evaluate_long_context_respects_eval_batch_override(tmp_path, monkeypatc
 
 
 def test_evaluate_loads_sparse_qk_norm_checkpoint(tmp_path):
+    if not torch.cuda.is_available():
+        pytest.skip("sparse_impl='flex' checkpoint test requires CUDA")
+
+    device = torch.device("cuda")
     cfg = OrionConfig(
         {
             "run": {
@@ -108,15 +113,15 @@ def test_evaluate_loads_sparse_qk_norm_checkpoint(tmp_path):
                 "backend": "sparse",
                 "window_size": 4,
                 "expander_degree": 2,
-                "sparse_impl": "gather",
+                "sparse_impl": "flex",
             },
             "stability": {"qk_norm": True},
         }
     )
-    train(cfg, device=torch.device("cpu"))
+    train(cfg, device=device)
     ckpt_path = tmp_path / "checkpoint.pt"
 
-    metrics = evaluate(cfg, checkpoint=str(ckpt_path), device=torch.device("cpu"))
+    metrics = evaluate(cfg, checkpoint=str(ckpt_path), device=device)
     assert set(metrics.keys()) == {"loss", "ppl"}
     assert math.isfinite(metrics["loss"])
     assert math.isfinite(metrics["ppl"])

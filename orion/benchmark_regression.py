@@ -89,6 +89,15 @@ def _sanitize_for_json(value):
     return value
 
 
+def _empty_summary() -> dict[str, float]:
+    return {
+        "throughput_tokens_per_sec": float("nan"),
+        "vram_peak_mib": float("nan"),
+        "attention_entropy_normalized": float("nan"),
+        "attn_score_mean": float("nan"),
+    }
+
+
 def _build_cfg(
     *,
     out_dir: Path,
@@ -157,16 +166,37 @@ def run_benchmarks(
             batch_size=batch_size,
             seed=seed,
         )
+        status = "ok"
+        error = ""
         started = time.time()
-        train(cfg, device=device)
-        elapsed = time.time() - started
-        summary = _read_run_metrics(run_dir / "metrics.jsonl")
+        # sparse_impl='flex' requires CUDA fused kernels; skip sparse benchmark on CPU.
+        if (
+            spec.backend == "sparse"
+            and (spec.sparse_impl or "").lower() == "flex"
+            and device.type != "cuda"
+        ):
+            status = "skipped"
+            error = "sparse_impl=flex requires CUDA; sparse benchmark skipped on CPU."
+            summary = _empty_summary()
+            elapsed = time.time() - started
+        else:
+            try:
+                train(cfg, device=device)
+                summary = _read_run_metrics(run_dir / "metrics.jsonl")
+            except Exception as e:
+                status = "failed"
+                error = f"{type(e).__name__}: {e}"
+                summary = _empty_summary()
+            elapsed = time.time() - started
         summary.update(
             {
                 "name": spec.name,
                 "backend": spec.backend,
                 "window_size": spec.window_size,
                 "expander_degree": spec.expander_degree,
+                "sparse_impl": spec.sparse_impl,
+                "status": status,
+                "error": error,
                 "elapsed_sec": elapsed,
                 "run_dir": str(run_dir),
             }
@@ -194,13 +224,15 @@ def run_benchmarks(
         f"- seq_len: `{seq_len}`",
         f"- batch_size: `{batch_size}`",
         "",
-        "| run | backend | throughput tok/s | vram MiB | attn_ent_norm | attn_score_mean | elapsed s |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| run | backend | sparse_impl | status | throughput tok/s | vram MiB | attn_ent_norm | attn_score_mean | elapsed s |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         lines.append(
             "| "
             f"{row['name']} | {row['backend']} | "
+            f"{row.get('sparse_impl') or 'NA'} | "
+            f"{row.get('status', 'ok')} | "
             f"{_fmt(row['throughput_tokens_per_sec'], 1)} | "
             f"{_fmt(row['vram_peak_mib'], 1)} | "
             f"{_fmt(row['attention_entropy_normalized'], 4)} | "
