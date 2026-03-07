@@ -5,6 +5,7 @@ import torch
 from .config import OrionConfig, load_config
 from .model import loss_fn
 from .models_factory import build_model
+from .stability import any_stability_enabled, effective_stability_for_backend
 
 
 def _infer_vocab_size_from_state_dict(state_dict: dict[str, torch.Tensor]) -> int | None:
@@ -45,6 +46,62 @@ def _is_cuda_oom(exc: BaseException) -> bool:
             "out of memory",
         )
     )
+
+
+def _build_and_load_model_for_eval(
+    *,
+    model_cfg: OrionConfig,
+    ckpt: dict,
+    vocab_size: int,
+    device: torch.device,
+) -> torch.nn.Module:
+    """Build model matching checkpoint architecture and load weights."""
+    d_model = int(model_cfg.get("model", "d_model", default=128))
+    n_layers = int(model_cfg.get("model", "n_layers", default=2))
+    n_heads = int(model_cfg.get("model", "n_heads", default=4))
+    mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
+    model_name = str(model_cfg.get("model", "name", default="tiny"))
+    attention_cfg = model_cfg.attention_config()
+    raw_stability_cfg = model_cfg.stability_config()
+    effective_stability_cfg = effective_stability_for_backend(
+        raw_stability_cfg, attention_backend=attention_cfg.backend
+    )
+
+    model = build_model(
+        name=model_name,
+        vocab_size=vocab_size,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        mlp_mult=mlp_mult,
+        device=device,
+        attention_cfg=attention_cfg,
+        stability_cfg=effective_stability_cfg,
+    )
+
+    try:
+        model.load_state_dict(ckpt["model"], strict=True)
+    except RuntimeError:
+        # Backward compatibility for older checkpoints that applied stability to non-sparse backends.
+        if effective_stability_cfg != raw_stability_cfg and any_stability_enabled(
+            raw_stability_cfg
+        ):
+            model = build_model(
+                name=model_name,
+                vocab_size=vocab_size,
+                d_model=d_model,
+                n_layers=n_layers,
+                n_heads=n_heads,
+                mlp_mult=mlp_mult,
+                device=device,
+                attention_cfg=attention_cfg,
+                stability_cfg=raw_stability_cfg,
+            )
+            model.load_state_dict(ckpt["model"], strict=True)
+        else:
+            raise
+    model.eval()
+    return model
 
 
 @torch.no_grad()
@@ -94,27 +151,12 @@ def evaluate(cfg: OrionConfig, *, checkpoint: str, device: torch.device) -> dict
     seq_len = int(cfg.get("data", "seq_len", default=128))
     batch_size = int(cfg.get("data", "batch_size", default=8))
 
-    d_model = int(model_cfg.get("model", "d_model", default=128))
-    n_layers = int(model_cfg.get("model", "n_layers", default=2))
-    n_heads = int(model_cfg.get("model", "n_heads", default=4))
-    mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
-
-    model_name = str(model_cfg.get("model", "name", default="tiny"))
-    attention_cfg = model_cfg.attention_config()
-
-    model = build_model(
-        name=model_name,
+    model = _build_and_load_model_for_eval(
+        model_cfg=model_cfg,
+        ckpt=ckpt,
         vocab_size=vocab_size,
-        d_model=d_model,
-        n_layers=n_layers,
-        n_heads=n_heads,
-        mlp_mult=mlp_mult,
         device=device,
-        attention_cfg=attention_cfg,
     )
-
-    model.load_state_dict(ckpt["model"], strict=True)
-    model.eval()
 
     x = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
     y = torch.roll(x, shifts=-1, dims=1)
@@ -150,27 +192,12 @@ def evaluate_long_context(
         base_eval_batch_size = 1 if device.type == "cuda" else train_batch_size
     base_eval_batch_size = max(1, base_eval_batch_size)
 
-    d_model = int(model_cfg.get("model", "d_model", default=128))
-    n_layers = int(model_cfg.get("model", "n_layers", default=2))
-    n_heads = int(model_cfg.get("model", "n_heads", default=4))
-    mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
-
-    model_name = str(model_cfg.get("model", "name", default="tiny"))
-    attention_cfg = model_cfg.attention_config()
-
-    model = build_model(
-        name=model_name,
+    model = _build_and_load_model_for_eval(
+        model_cfg=model_cfg,
+        ckpt=ckpt,
         vocab_size=vocab_size,
-        d_model=d_model,
-        n_layers=n_layers,
-        n_heads=n_heads,
-        mlp_mult=mlp_mult,
         device=device,
-        attention_cfg=attention_cfg,
     )
-
-    model.load_state_dict(ckpt["model"], strict=True)
-    model.eval()
 
     results = {}
     for context_len in [512, 1024, 2048, 4096]:

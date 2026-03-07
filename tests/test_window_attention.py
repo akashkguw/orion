@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn.functional as F
 
@@ -177,3 +179,46 @@ class TestWindowExternalMasking:
             raise AssertionError("Expected ValueError for invalid mask head dimension")
         except ValueError:
             pass
+
+
+class TestWindowMetricsProbe:
+    def test_probe_populates_entropy_and_score_metrics(self):
+        cfg = AttentionConfig(
+            backend="window",
+            window_size=8,
+            window_probe_every=1,
+            window_probe_tokens=16,
+        )
+        attn = WindowAttention(cfg)
+
+        B, H, T, Dh = 2, 2, 16, 16
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        _ = attn.forward(q, k, v)
+
+        assert math.isfinite(attn.last_attn_score_mean)
+        assert math.isfinite(attn.last_attn_entropy)
+        assert math.isfinite(attn.last_attn_entropy_normalized)
+        assert 0.0 <= attn.last_attn_entropy_normalized <= 1.0
+
+    def test_probe_disabled_marks_weight_metrics_unavailable(self):
+        cfg = AttentionConfig(
+            backend="window",
+            window_size=8,
+            window_probe_every=0,
+            window_probe_tokens=16,
+        )
+        attn = WindowAttention(cfg)
+
+        B, H, T, Dh = 1, 2, 8, 16
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        _ = attn.forward(q, k, v)
+
+        assert math.isnan(attn.last_attn_score_mean)
+        assert math.isnan(attn.last_attn_entropy)
+        assert math.isnan(attn.last_attn_entropy_normalized)

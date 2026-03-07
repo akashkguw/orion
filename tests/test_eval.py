@@ -8,6 +8,7 @@ import orion.eval as eval_mod
 from orion.config import OrionConfig
 from orion.eval import evaluate, evaluate_long_context
 from orion.model import TinyDecoderOnly
+from orion.train import train
 
 
 def _save_tiny_checkpoint(path: str, *, vocab_size: int, d_model: int) -> None:
@@ -89,3 +90,33 @@ def test_evaluate_long_context_respects_eval_batch_override(tmp_path, monkeypatc
         "eval_ppl_2048": 2048.0,
         "eval_ppl_4096": 4096.0,
     }
+
+
+def test_evaluate_loads_sparse_qk_norm_checkpoint(tmp_path):
+    cfg = OrionConfig(
+        {
+            "run": {
+                "out_dir": str(tmp_path),
+                "seed": 0,
+                "steps": 2,
+                "log_every": 2,
+                "save_every": 2,
+            },
+            "data": {"seq_len": 16, "batch_size": 2, "vocab_size": 64},
+            "model": {"name": "orion", "d_model": 32, "n_layers": 2, "n_heads": 4, "mlp_mult": 2},
+            "attention": {
+                "backend": "sparse",
+                "window_size": 4,
+                "expander_degree": 2,
+                "sparse_impl": "gather",
+            },
+            "stability": {"qk_norm": True},
+        }
+    )
+    train(cfg, device=torch.device("cpu"))
+    ckpt_path = tmp_path / "checkpoint.pt"
+
+    metrics = evaluate(cfg, checkpoint=str(ckpt_path), device=torch.device("cpu"))
+    assert set(metrics.keys()) == {"loss", "ppl"}
+    assert math.isfinite(metrics["loss"])
+    assert math.isfinite(metrics["ppl"])
