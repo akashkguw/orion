@@ -12,6 +12,19 @@ class StabilityConfig:
     spectral_norm: bool = False
 
 
+def any_stability_enabled(cfg: StabilityConfig) -> bool:
+    return bool(cfg.qk_norm or cfg.ortho_init or cfg.spectral_norm)
+
+
+def effective_stability_for_backend(
+    cfg: StabilityConfig, *, attention_backend: str
+) -> StabilityConfig:
+    """Apply stability controls only for sparse attention backends."""
+    if attention_backend.lower() != "sparse":
+        return StabilityConfig()
+    return cfg
+
+
 def apply_ortho_init(model: nn.Module) -> None:
     """Apply orthogonal init to attention projection weights in all DecoderBlocks."""
     from orion.models.blocks import DecoderBlock

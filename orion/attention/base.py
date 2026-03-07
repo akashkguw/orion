@@ -22,6 +22,10 @@ class AttentionConfig:
     # every N forward calls, run a small gather probe to estimate entropy/mass.
     sparse_probe_every: int = 0
     sparse_probe_tokens: int = 256
+    # Optional probe metrics for window backend:
+    # every N forward calls, run a bounded probe to estimate entropy/score.
+    window_probe_every: int = 50
+    window_probe_tokens: int = 256
 
 
 class AttentionBackend(Protocol):

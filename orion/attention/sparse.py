@@ -140,7 +140,7 @@ class SparseAttention:
         self.last_valid_neighbor_fraction_vs_causal_cap: float = 0.0
         self.last_attention_mass_window_pct: float = 0.0
         self.last_attention_mass_expander_pct: float = 0.0
-        self.last_attn_score_mean: float = 0.0
+        self.last_attn_score_mean: float = float("nan")
         self.last_total_neighbor_slots: int = 0
         self.last_valid_neighbor_slots: int = 0
         self.last_invalid_neighbor_slots: int = 0
@@ -319,6 +319,7 @@ class SparseAttention:
     def _set_unavailable_weight_metrics(self) -> None:
         """Set weight-derived metrics when fused path does not expose attention weights."""
         self.last_attn_weights = None
+        self.last_attn_score_mean = float("nan")
         # Fused flex_attention does not expose per-edge attention weights, so these
         # metrics are unavailable (not zero).
         self.last_attn_entropy = float("nan")

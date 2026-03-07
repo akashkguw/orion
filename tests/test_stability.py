@@ -4,6 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
 import torch
 
 from orion.attention.base import AttentionConfig
@@ -66,12 +67,38 @@ def test_stability_config_no_stability_section():
     assert sc == StabilityConfig()
 
 
+def test_stability_config_string_bool_parsing():
+    cfg = OrionConfig(
+        {
+            "run": {"out_dir": "runs/test"},
+            "stability": {"qk_norm": "true", "ortho_init": "0", "spectral_norm": "no"},
+        }
+    )
+    sc = cfg.stability_config()
+    assert sc.qk_norm is True
+    assert sc.ortho_init is False
+    assert sc.spectral_norm is False
+
+
+def test_stability_config_invalid_section_type_raises():
+    cfg = OrionConfig({"run": {"out_dir": "runs/test"}, "stability": True})
+    with pytest.raises(ValueError, match="'stability' must be a mapping"):
+        _ = cfg.stability_config()
+
+
+def test_stability_config_invalid_bool_value_raises():
+    cfg = OrionConfig({"run": {"out_dir": "runs/test"}, "stability": {"qk_norm": "definitely"}})
+    with pytest.raises(ValueError, match="Invalid boolean value for stability.qk_norm"):
+        _ = cfg.stability_config()
+
+
 # ---- QK-norm ----
 
 
 def test_qk_norm_output_shape_unchanged():
-    model_norm = _build_orion(StabilityConfig(qk_norm=True))
-    model_base = _build_orion(StabilityConfig(qk_norm=False))
+    sparse_cfg = _tiny_sparse_cfg()
+    model_norm = _build_orion(StabilityConfig(qk_norm=True), attention_cfg=sparse_cfg)
+    model_base = _build_orion(StabilityConfig(qk_norm=False), attention_cfg=sparse_cfg)
     idx = torch.randint(0, 64, (2, 16))
     out_norm = model_norm(idx)
     out_base = model_base(idx)
@@ -88,9 +115,10 @@ def test_qk_norm_bounds_score_magnitude():
     from orion.models.blocks import DecoderBlock
 
     torch.manual_seed(42)
-    model_base = _build_orion(StabilityConfig(qk_norm=False))
+    sparse_cfg = _tiny_sparse_cfg()
+    model_base = _build_orion(StabilityConfig(qk_norm=False), attention_cfg=sparse_cfg)
     torch.manual_seed(42)
-    model_norm = _build_orion(StabilityConfig(qk_norm=True))
+    model_norm = _build_orion(StabilityConfig(qk_norm=True), attention_cfg=sparse_cfg)
 
     # Scale up q/k projections in both models — norm model will still bound scores
     for model in (model_base, model_norm):
@@ -110,17 +138,17 @@ def test_qk_norm_bounds_score_magnitude():
 
     from orion.train import _find_attention_backends
 
-    _, dense_base = _find_attention_backends(model_base)
-    _, dense_norm = _find_attention_backends(model_norm)
+    sparse_base, _, _ = _find_attention_backends(model_base)
+    sparse_norm, _, _ = _find_attention_backends(model_norm)
 
-    assert dense_base is not None and dense_norm is not None
-    assert dense_norm.last_attn_score_mean < dense_base.last_attn_score_mean
+    assert sparse_base is not None and sparse_norm is not None
+    assert sparse_norm.last_attn_score_mean < sparse_base.last_attn_score_mean
 
 
 def test_qk_norm_blocks_have_norm_layers():
     from orion.models.blocks import DecoderBlock
 
-    model = _build_orion(StabilityConfig(qk_norm=True))
+    model = _build_orion(StabilityConfig(qk_norm=True), attention_cfg=_tiny_sparse_cfg())
     for block in model.modules():
         if isinstance(block, DecoderBlock):
             assert block.q_norm is not None
@@ -130,7 +158,7 @@ def test_qk_norm_blocks_have_norm_layers():
 def test_no_qk_norm_blocks_have_none():
     from orion.models.blocks import DecoderBlock
 
-    model = _build_orion(StabilityConfig(qk_norm=False))
+    model = _build_orion(StabilityConfig(qk_norm=False), attention_cfg=_tiny_sparse_cfg())
     for block in model.modules():
         if isinstance(block, DecoderBlock):
             assert block.q_norm is None
@@ -142,7 +170,12 @@ def test_no_qk_norm_blocks_have_none():
 
 def test_ortho_init_orthogonality():
     """After ortho init, q_proj.weight @ q_proj.weight.T ≈ I (for square weights)."""
-    model = _build_orion(StabilityConfig(ortho_init=True), d_model=32, n_heads=4)
+    model = _build_orion(
+        StabilityConfig(ortho_init=True),
+        attention_cfg=_tiny_sparse_cfg(),
+        d_model=32,
+        n_heads=4,
+    )
     from orion.models.blocks import DecoderBlock
 
     for block in model.modules():
@@ -161,7 +194,7 @@ def test_ortho_init_orthogonality():
 
 
 def test_spectral_norm_wraps_projections():
-    model = _build_orion(StabilityConfig(spectral_norm=True))
+    model = _build_orion(StabilityConfig(spectral_norm=True), attention_cfg=_tiny_sparse_cfg())
     from orion.models.blocks import DecoderBlock
 
     for block in model.modules():
@@ -176,7 +209,7 @@ def test_spectral_norm_wraps_projections():
 
 
 def test_spectral_norm_no_wrap_without_flag():
-    model = _build_orion(StabilityConfig(spectral_norm=False))
+    model = _build_orion(StabilityConfig(spectral_norm=False), attention_cfg=_tiny_sparse_cfg())
     from orion.models.blocks import DecoderBlock
 
     for block in model.modules():
@@ -198,7 +231,7 @@ def test_all_toggles_train_step():
             "run": {"out_dir": tmpdir, "seed": 0, "steps": 3, "log_every": 1, "save_every": 3},
             "data": {"seq_len": 16, "batch_size": 2, "vocab_size": 64},
             "model": {"name": "orion", "d_model": 32, "n_layers": 2, "n_heads": 4, "mlp_mult": 2},
-            "attention": {"backend": "dense"},
+            "attention": {"backend": "sparse", "window_size": 4, "expander_degree": 2},
             "stability": {"qk_norm": True, "ortho_init": True, "spectral_norm": True},
         }
         cfg = OrionConfig(cfg_dict)
@@ -217,7 +250,7 @@ def test_stability_flags_in_run_metrics():
             "run": {"out_dir": tmpdir, "seed": 0, "steps": 3, "log_every": 1, "save_every": 3},
             "data": {"seq_len": 16, "batch_size": 2, "vocab_size": 64},
             "model": {"name": "orion", "d_model": 32, "n_layers": 2, "n_heads": 4, "mlp_mult": 2},
-            "attention": {"backend": "dense"},
+            "attention": {"backend": "sparse", "window_size": 4, "expander_degree": 2},
             "stability": {"qk_norm": True, "ortho_init": False, "spectral_norm": True},
         }
         cfg = OrionConfig(cfg_dict)
@@ -236,6 +269,37 @@ def test_stability_flags_in_run_metrics():
         assert run_entry["qk_norm"] is True
         assert run_entry["ortho_init"] is False
         assert run_entry["spectral_norm"] is True
+
+
+def test_dense_backend_disables_stability_flags_in_run_metrics():
+    """Dense backend should ignore stability controls and log all flags false."""
+    from orion.config import OrionConfig
+    from orion.train import train
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cfg_dict = {
+            "run": {"out_dir": tmpdir, "seed": 0, "steps": 3, "log_every": 1, "save_every": 3},
+            "data": {"seq_len": 16, "batch_size": 2, "vocab_size": 64},
+            "model": {"name": "orion", "d_model": 32, "n_layers": 2, "n_heads": 4, "mlp_mult": 2},
+            "attention": {"backend": "dense"},
+            "stability": {"qk_norm": True, "ortho_init": True, "spectral_norm": True},
+        }
+        cfg = OrionConfig(cfg_dict)
+        train(cfg, device=torch.device("cpu"))
+
+        metrics_path = Path(tmpdir) / "metrics.jsonl"
+        run_entry = None
+        with open(metrics_path) as f:
+            for line in f:
+                row = json.loads(line)
+                if row.get("type") == "run":
+                    run_entry = row
+                    break
+
+        assert run_entry is not None, "No 'type: run' entry found in metrics.jsonl"
+        assert run_entry["qk_norm"] is False
+        assert run_entry["ortho_init"] is False
+        assert run_entry["spectral_norm"] is False
 
 
 def test_attn_score_mean_in_window_metrics():
@@ -266,3 +330,5 @@ def test_attn_score_mean_in_window_metrics():
         assert window_entry is not None, "No 'type: window' entry found"
         assert "attn_score_mean" in window_entry
         assert isinstance(window_entry["attn_score_mean"], float)
+        assert "attention_entropy_collapse" in window_entry
+        assert isinstance(window_entry["attention_entropy_collapse"], bool)

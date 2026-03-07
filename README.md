@@ -100,6 +100,8 @@ Three toggleable stability mechanisms, all config-driven:
 | **Ortho init** | `stability.ortho_init: true` | Orthogonal init on Q/K/V/O projections; improves gradient flow at init |
 | **Spectral norm** | `stability.spectral_norm: true` | Wraps Q/K projections with `nn.utils.spectral_norm`; bounds Lipschitz constant |
 
+Note: stability toggles are applied only when `attention.backend: sparse`. For `dense`/`window`, they are ignored and logged as disabled.
+
 **Configuration:**
 ```yaml
 stability:
@@ -345,9 +347,22 @@ python -m orion.train --config configs/exp_window_256.yaml
 # Run 8-combo stability matrix (baseline + 7 toggle combinations)
 python -m orion.ablation --config configs/ablation_sparse_a.yaml  # compact
 python -m orion.ablation --config configs/ablation_sparse_b.yaml  # medium
+python -m orion.ablation --top2  # run both configs + emit combined winners summary
 
 # Results saved to runs/ablation_summary.json
 ```
+
+## CI Benchmark Regression
+
+Minimal dense/window/sparse regression benchmark (throughput + VRAM metric capture):
+
+```bash
+python -m orion.benchmark_regression --out-dir runs/ci_benchmark --steps 50 --seq-len 128 --batch-size 4
+```
+
+Outputs:
+- `runs/ci_benchmark/benchmark_summary.json`
+- `runs/ci_benchmark/benchmark_summary.md`
 
 **Metrics Inspection:**
 ```bash
