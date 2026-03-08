@@ -84,7 +84,7 @@ class OrionConfig:
         if sparse_impl is None:
             sparse_impl = model_section.get("sparse_impl")
         if sparse_impl is None:
-            sparse_impl = "auto"
+            sparse_impl = "flex"
 
         sparse_block_size = attention_section.get("sparse_block_size")
         if sparse_block_size is None:

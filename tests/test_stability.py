@@ -237,7 +237,12 @@ def test_all_toggles_train_step():
             "run": {"out_dir": tmpdir, "seed": 0, "steps": 3, "log_every": 1, "save_every": 3},
             "data": {"seq_len": 16, "batch_size": 2, "vocab_size": 64},
             "model": {"name": "orion", "d_model": 32, "n_layers": 2, "n_heads": 4, "mlp_mult": 2},
-            "attention": {"backend": "sparse", "window_size": 4, "expander_degree": 2},
+            "attention": {
+                "backend": "sparse",
+                "window_size": 4,
+                "expander_degree": 2,
+                "sparse_impl": "auto",
+            },
             "stability": {"qk_norm": True, "ortho_init": True, "spectral_norm": True},
         }
         cfg = OrionConfig(cfg_dict)
@@ -256,7 +261,12 @@ def test_stability_flags_in_run_metrics():
             "run": {"out_dir": tmpdir, "seed": 0, "steps": 3, "log_every": 1, "save_every": 3},
             "data": {"seq_len": 16, "batch_size": 2, "vocab_size": 64},
             "model": {"name": "orion", "d_model": 32, "n_layers": 2, "n_heads": 4, "mlp_mult": 2},
-            "attention": {"backend": "sparse", "window_size": 4, "expander_degree": 2},
+            "attention": {
+                "backend": "sparse",
+                "window_size": 4,
+                "expander_degree": 2,
+                "sparse_impl": "auto",
+            },
             "stability": {"qk_norm": True, "ortho_init": False, "spectral_norm": True},
         }
         cfg = OrionConfig(cfg_dict)

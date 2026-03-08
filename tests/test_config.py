@@ -79,7 +79,7 @@ def test_attention_config_defaults():
     assert acfg.backend == "dense"
     assert acfg.window_size is None
     assert acfg.expander_degree is None
-    assert acfg.sparse_impl == "auto"
+    assert acfg.sparse_impl == "flex"
     assert acfg.sparse_block_size == 128
     assert acfg.sparse_probe_every == 0
     assert acfg.sparse_probe_tokens == 256
