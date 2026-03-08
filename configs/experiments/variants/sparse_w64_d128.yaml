@@ -1,0 +1,31 @@
+run:
+  out_dir: runs/exp_sparse_w64_d128
+  seed: 123
+  steps: 100
+  log_every: 10
+  save_every: 100
+
+data:
+  dataset: tinyshakespeare
+  root: data
+  seq_len: 256
+  batch_size: 8
+
+model:
+  name: orion
+  d_model: 256
+  n_layers: 4
+  n_heads: 4
+  mlp_mult: 4
+
+attention:
+  backend: sparse
+  window_size: 64
+  expander_degree: 128
+  sparse_impl: flex
+  sparse_block_size: 128
+  sparse_probe_every: 50
+  sparse_probe_tokens: 256
+
+optim:
+  lr: 3e-4

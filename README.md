@@ -160,13 +160,14 @@ The experiment workflow is config-driven, with execution handled by `orion.exper
 - `pilot`: broader sweep
 - `full`: longer-context sweep
 - `pilot_norm`: sparse+norm vs window vs dense
+- `w64_d_sweep`: fixed `w=64` and increasing sparse degree (`d=8,16,32,64,128,256`)
 
 ### Run in notebook
 
 Open [`experiment.ipynb`](./experiment.ipynb), then set:
 
 ```python
-PROFILE = "pilot9"  # or pilot, full, pilot_norm
+PROFILE = "pilot9"  # or pilot, full, pilot_norm, w64_d_sweep
 ```
 
 The notebook is intentionally thin:
