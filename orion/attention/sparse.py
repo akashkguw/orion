@@ -120,7 +120,7 @@ class SparseAttention:
         self.cfg = cfg
         self.window_size = max(1, cfg.window_size or 64)  # Ensure window_size >= 1
         self.expander_degree = cfg.expander_degree or 8
-        self.sparse_impl = (cfg.sparse_impl or "auto").lower()
+        self.sparse_impl = (cfg.sparse_impl or "flex").lower()
         self.sparse_block_size = max(16, int(cfg.sparse_block_size or 128))
         self.sparse_probe_every = max(0, int(getattr(cfg, "sparse_probe_every", 0) or 0))
         self.sparse_probe_tokens = max(16, int(getattr(cfg, "sparse_probe_tokens", 256) or 256))
@@ -128,8 +128,10 @@ class SparseAttention:
         self.indices_per_head_cache: dict[tuple, torch.Tensor] = {}
         self.block_mask_cache: dict[tuple, torch.Tensor] = {}
         self._fused_attention_fn = None
+        self._fused_compile_dynamic: bool | None = None
         self._warned_fallback = False
         self._warned_compile_fallback = False
+        self._warned_static_compile_fallback = False
         self._warned_probe_failure = False
         self._forward_calls = 0
         self.last_attn_weights: torch.Tensor | None = None  # Store for metrics
@@ -303,17 +305,46 @@ class SparseAttention:
         self.block_mask_cache[cache_key] = block_mask
         return block_mask
 
+    def _compile_flex_attention(self, *, dynamic: bool):
+        """Compile flex_attention with requested dynamic-shape setting."""
+        assert flex_attention is not None
+        return torch.compile(flex_attention, dynamic=dynamic)
+
     def _get_fused_attention_fn(self):
         """Get a compiled fused sparse attention function (cached)."""
         if self._fused_attention_fn is not None:
             return self._fused_attention_fn
-        assert flex_attention is not None
+        dynamic_error: Exception | None = None
         try:
-            self._fused_attention_fn = torch.compile(flex_attention, dynamic=True)
+            self._fused_attention_fn = self._compile_flex_attention(dynamic=True)
+            self._fused_compile_dynamic = True
         except Exception as e:
+            dynamic_error = e
+            try:
+                self._fused_attention_fn = self._compile_flex_attention(dynamic=False)
+                self._fused_compile_dynamic = False
+                if not self._warned_static_compile_fallback:
+                    warnings.warn(
+                        "Dynamic compile for flex_attention failed; using static compiled "
+                        "flex_attention instead.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    self._warned_static_compile_fallback = True
+            except Exception as static_error:
+                self._fused_compile_dynamic = None
+                self._fused_attention_fn = None
+                assert dynamic_error is not None
+                detail = (
+                    "Failed to compile fused sparse kernel with torch.compile. "
+                    f"dynamic=True error: {type(dynamic_error).__name__}: {dynamic_error}; "
+                    f"dynamic=False error: {type(static_error).__name__}: {static_error}"
+                )
+                raise RuntimeError(detail) from static_error
+        if self._fused_attention_fn is None:
             raise RuntimeError(
-                f"Failed to compile fused sparse kernel with torch.compile: {type(e).__name__}: {e}"
-            ) from e
+                "Internal error: fused attention function was not initialized after compile."
+            )
         return self._fused_attention_fn
 
     def _set_unavailable_weight_metrics(self) -> None:
@@ -454,14 +485,44 @@ class SparseAttention:
         fused_attention_fn = self._get_fused_attention_fn()
         try:
             output = fused_attention_fn(q, k, v, block_mask=block_mask)
-        except Exception:
-            # Retry once in eager flex mode if compiled flex lowering fails.
-            if flex_attention is None or fused_attention_fn is flex_attention:
+        except Exception as compile_runtime_error:
+            # Dynamic compiled kernels can fail at runtime on some environments.
+            # Retry once with a static compiled kernel before considering eager fallback.
+            if self._fused_compile_dynamic is True:
+                try:
+                    self._fused_attention_fn = self._compile_flex_attention(dynamic=False)
+                    self._fused_compile_dynamic = False
+                    if not self._warned_static_compile_fallback:
+                        warnings.warn(
+                            "Dynamic compiled flex_attention failed at runtime; retrying with "
+                            "static compiled flex_attention.",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                        self._warned_static_compile_fallback = True
+                    output = self._fused_attention_fn(q, k, v, block_mask=block_mask)
+                    self._set_unavailable_weight_metrics()
+                    self._maybe_probe_weight_metrics(q, k, indices_per_head=indices_per_head)
+                    return output
+                except Exception:
+                    # Continue to strict/fallback policy below.
+                    pass
+
+            if self.sparse_impl == "flex":
+                raise RuntimeError(
+                    "Compiled flex_attention failed at runtime while sparse_impl='flex'. "
+                    "No eager fallback is allowed in strict flex mode."
+                ) from compile_runtime_error
+
+            # sparse_impl='auto': retry in eager flex mode if compiled lowering fails.
+            if flex_attention is None:
                 raise
             self._fused_attention_fn = flex_attention
+            self._fused_compile_dynamic = None
             if not self._warned_compile_fallback:
                 warnings.warn(
-                    "Compiled flex_attention failed at runtime; retrying with eager flex_attention.",
+                    "Compiled flex_attention failed at runtime; falling back to eager "
+                    "flex_attention (sparse_impl='auto').",
                     RuntimeWarning,
                     stacklevel=2,
                 )

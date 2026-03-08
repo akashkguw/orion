@@ -60,6 +60,8 @@ def test_model_attention_combinations(model_name: str, attention_backend: str | 
                 "window_size": 8,
                 "expander_degree": 2,
             }
+            if attention_backend == "sparse":
+                cfg["attention"]["sparse_impl"] = "auto"
 
         cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
 

@@ -15,7 +15,7 @@ class AttentionConfig:
     # - "auto": use fused sparse kernel when available, else gather path
     # - "gather": always use explicit gather/scatter sparse path
     # - "flex": require fused sparse kernel path
-    sparse_impl: str = "auto"
+    sparse_impl: str = "flex"
     # Block size used by torch flex_attention block masks
     sparse_block_size: int = 128
     # Optional probe metrics for fused sparse path:
