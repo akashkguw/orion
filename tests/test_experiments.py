@@ -34,3 +34,15 @@ def test_window_and_sparse_trials_skip_window_ge_seq_len():
     assert len(specs) == 2
     assert backends.count("dense") == 1
     assert backends.count("sparse") == 1
+
+
+def test_w64_d_sweep_profile_contains_sparse_degree_sweep_to_256():
+    ctx = load_profile_context("w64_d_sweep", repo_root=REPO_ROOT)
+    variants = load_variant_definitions(ctx)
+
+    sparse_variants = [variant for variant in variants if variant.backend == "sparse"]
+    degrees = sorted(variant.expander_degree for variant in sparse_variants)
+    windows = {variant.window_size for variant in sparse_variants}
+
+    assert windows == {64}
+    assert degrees == [8, 16, 32, 64, 128, 256]
