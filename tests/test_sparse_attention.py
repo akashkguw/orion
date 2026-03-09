@@ -1,6 +1,9 @@
+import math
+
 import pytest
 import torch
 
+import orion.attention.sparse as sparse_module
 from orion.attention.base import AttentionConfig
 from orion.attention.sparse import SparseAttention, build_sparse_indices
 from orion.model import loss_fn
@@ -107,7 +110,9 @@ class TestSparseAttention:
     def test_forward_shape(self):
         """Test that output has correct shape."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -121,7 +126,9 @@ class TestSparseAttention:
     def test_forward_device(self):
         """Test that output is on correct device."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -135,7 +142,9 @@ class TestSparseAttention:
     def test_forward_dtype(self):
         """Test that output has correct dtype."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh, dtype=torch.float32)
@@ -149,7 +158,9 @@ class TestSparseAttention:
     def test_forward_no_nan(self):
         """Test that output contains no NaN values."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -162,7 +173,9 @@ class TestSparseAttention:
 
     def test_attention_mass_split_uses_window_slot_mask(self):
         """Mass split should be computed from semantic window membership, not slot position."""
-        cfg = AttentionConfig(backend="sparse", window_size=3, expander_degree=1)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=3, expander_degree=1, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         # One query token, four sparse neighbors.
@@ -179,7 +192,9 @@ class TestSparseAttention:
     def test_index_diagnostics_have_no_future_or_duplicates(self):
         """Sparse index diagnostics should report no future/duplicate edges."""
         B, H, T, Dh = 2, 4, 64, 32
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -197,7 +212,10 @@ class TestSparseAttention:
         B, H, T, Dh = 1, 1, 256, 8
         window_size, expander_degree = 256, 16
         cfg = AttentionConfig(
-            backend="sparse", window_size=window_size, expander_degree=expander_degree
+            backend="sparse",
+            window_size=window_size,
+            expander_degree=expander_degree,
+            sparse_impl="auto",
         )
         attn = SparseAttention(cfg)
 
@@ -213,7 +231,9 @@ class TestSparseAttention:
     def test_forward_with_padding_mask(self):
         """Test forward pass with padding mask."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -232,7 +252,9 @@ class TestSparseAttention:
     def test_forward_with_full_mask(self):
         """Test forward pass with full attention mask."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -252,7 +274,9 @@ class TestSparseAttention:
     def test_indices_caching(self):
         """Test that indices are cached correctly."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -272,7 +296,9 @@ class TestSparseAttention:
     def test_different_sequence_lengths(self):
         """Test with different sequence lengths."""
         B, H, Dh = 2, 4, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         for T in [16, 32, 64, 128]:
@@ -288,7 +314,9 @@ class TestSparseAttention:
     def test_gradient_flow(self):
         """Test that gradients flow through sparse attention."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh, requires_grad=True)
@@ -309,7 +337,9 @@ class TestSparseAttentionIntegration:
 
     def test_model_with_sparse_attention(self):
         """Test building model with sparse attention."""
-        cfg = AttentionConfig(backend="sparse", window_size=16, expander_degree=8)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=16, expander_degree=8, sparse_impl="auto"
+        )
         model = build_model(
             name="orion",
             vocab_size=256,
@@ -325,7 +355,9 @@ class TestSparseAttentionIntegration:
 
     def test_forward_pass_with_sparse(self):
         """Test forward pass with sparse attention."""
-        cfg = AttentionConfig(backend="sparse", window_size=16, expander_degree=8)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=16, expander_degree=8, sparse_impl="auto"
+        )
         model = build_model(
             name="orion",
             vocab_size=256,
@@ -344,7 +376,9 @@ class TestSparseAttentionIntegration:
 
     def test_loss_computation_with_sparse(self):
         """Test loss computation with sparse attention."""
-        cfg = AttentionConfig(backend="sparse", window_size=16, expander_degree=8)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=16, expander_degree=8, sparse_impl="auto"
+        )
         model = build_model(
             name="orion",
             vocab_size=256,
@@ -367,7 +401,9 @@ class TestSparseAttentionIntegration:
 
     def test_training_step_with_sparse(self):
         """Test training step with sparse attention."""
-        cfg = AttentionConfig(backend="sparse", window_size=16, expander_degree=8)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=16, expander_degree=8, sparse_impl="auto"
+        )
         model = build_model(
             name="orion",
             vocab_size=256,
@@ -402,7 +438,9 @@ class TestSparseAttentionIntegration:
         """Test that sparse and dense produce same output shape."""
         from orion.attention.base import AttentionConfig
 
-        sparse_cfg = AttentionConfig(backend="sparse", window_size=16, expander_degree=8)
+        sparse_cfg = AttentionConfig(
+            backend="sparse", window_size=16, expander_degree=8, sparse_impl="auto"
+        )
         dense_cfg = AttentionConfig(backend="dense")
 
         sparse_model = build_model(
@@ -470,7 +508,9 @@ class TestSparseAttentionEdgeCases:
     def test_window_size_one(self):
         """Test with minimum window size (1)."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=1, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=1, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -485,7 +525,9 @@ class TestSparseAttentionEdgeCases:
     def test_large_expander_degree(self):
         """Test with large expander degree."""
         B, H, T, Dh = 2, 4, 64, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=16)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=16, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -500,7 +542,9 @@ class TestSparseAttentionEdgeCases:
     def test_single_head(self):
         """Test with single head."""
         B, H, T, Dh = 2, 1, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -515,7 +559,9 @@ class TestSparseAttentionEdgeCases:
     def test_single_batch(self):
         """Test with single batch."""
         B, H, T, Dh = 1, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -530,7 +576,9 @@ class TestSparseAttentionEdgeCases:
     def test_mask_broadcast_robustness(self):
         """Test that [B, 1, T, T] mask is properly expanded."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -549,7 +597,9 @@ class TestSparseAttentionEdgeCases:
     def test_all_masked_positions(self):
         """Test behavior when all positions are masked."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -570,7 +620,9 @@ class TestSparseAttentionEdgeCases:
     def test_attention_weights_sum_to_one(self):
         """Test that attention weights sum to 1 (when not all masked)."""
         B, H, T, Dh = 2, 4, 32, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         q = torch.randn(B, H, T, Dh)
@@ -610,7 +662,9 @@ class TestSparseAttentionEdgeCases:
     def test_different_sequence_lengths_same_model(self):
         """Test that same model handles different sequence lengths."""
         B, H, Dh = 2, 4, 64
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         for T in [16, 32, 64, 128]:
@@ -625,7 +679,9 @@ class TestSparseAttentionEdgeCases:
 
     def test_indices_cache_different_sequences(self):
         """Test that cache correctly handles different sequence lengths."""
-        cfg = AttentionConfig(backend="sparse", window_size=8, expander_degree=4)
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
         attn = SparseAttention(cfg)
 
         # Build indices for different lengths
@@ -654,11 +710,11 @@ class TestSparseAttentionEdgeCases:
         with pytest.raises(RuntimeError, match="sparse_impl='flex' requested"):
             _ = attn.forward(q, k, v)
 
-    def test_sparse_impl_gather_forces_reference_path(self):
-        """Explicit gather impl should keep metrics available."""
+    def test_sparse_impl_auto_uses_reference_path_when_fused_is_unavailable(self):
+        """Auto impl on CPU should use reference path and keep metrics available."""
         B, H, T, Dh = 1, 2, 16, 8
         cfg = AttentionConfig(
-            backend="sparse", window_size=8, expander_degree=4, sparse_impl="gather"
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
         )
         attn = SparseAttention(cfg)
 
@@ -669,3 +725,123 @@ class TestSparseAttentionEdgeCases:
         out = attn.forward(q, k, v)
         assert out.shape == (B, H, T, Dh)
         assert attn.last_attn_weights is not None
+
+    def test_unavailable_weight_metrics_are_nan(self):
+        """When fused weights are unavailable, entropy/mass metrics should be NaN (not zero)."""
+        cfg = AttentionConfig(
+            backend="sparse", window_size=8, expander_degree=4, sparse_impl="auto"
+        )
+        attn = SparseAttention(cfg)
+        attn.last_total_neighbor_slots = 100
+        attn.last_valid_neighbor_slots = 60
+        attn.last_valid_neighbor_fraction_causal_cap = 0.6
+
+        attn._set_unavailable_weight_metrics()
+
+        assert math.isnan(attn.last_attn_entropy)
+        assert math.isnan(attn.last_attn_entropy_normalized)
+        assert math.isnan(attn.last_attention_mass_window_pct)
+        assert math.isnan(attn.last_attention_mass_expander_pct)
+        assert attn.last_valid_neighbor_fraction == 0.6
+        assert attn.last_valid_neighbor_fraction_vs_causal_cap == 1.0
+
+    def test_probe_metrics_compute_entropy_and_mass(self):
+        """Probe path should populate entropy/mass metrics without storing full weights."""
+        B, H, T, Dh = 2, 2, 32, 16
+        cfg = AttentionConfig(
+            backend="sparse",
+            window_size=8,
+            expander_degree=4,
+            sparse_probe_every=1,
+            sparse_probe_tokens=16,
+        )
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        indices_per_head = attn._get_indices_per_head(T=T, H=H, device=q.device)
+        attn._compute_index_diagnostics(indices_per_head)
+        attn._set_unavailable_weight_metrics()
+
+        attn._maybe_probe_weight_metrics(q, k, indices_per_head=indices_per_head)
+
+        assert not math.isnan(attn.last_attn_entropy)
+        assert not math.isnan(attn.last_attn_entropy_normalized)
+        assert not math.isnan(attn.last_attention_mass_window_pct)
+        assert not math.isnan(attn.last_attention_mass_expander_pct)
+        assert attn.last_attn_weights is None
+
+    def test_sparse_impl_flex_does_not_use_eager_fallback_on_runtime_compile_failure(
+        self, monkeypatch
+    ):
+        """Strict flex mode should raise instead of silently running eager flex."""
+        B, H, T, Dh = 1, 1, 8, 8
+        cfg = AttentionConfig(
+            backend="sparse", window_size=4, expander_degree=2, sparse_impl="flex"
+        )
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        monkeypatch.setattr(attn, "_supports_fused_sparse", lambda *_args, **_kwargs: True)
+        monkeypatch.setattr(attn, "_get_fused_block_mask", lambda **_kwargs: object())
+
+        def _compiled_fail(*_args, **_kwargs):
+            raise RuntimeError("compiled runtime failure")
+
+        monkeypatch.setattr(attn, "_get_fused_attention_fn", lambda: _compiled_fail)
+        monkeypatch.setattr(attn, "_compile_flex_attention", lambda *, dynamic: _compiled_fail)
+        attn._fused_compile_dynamic = False
+
+        eager_called = {"value": False}
+
+        def _eager_stub(*_args, **_kwargs):
+            eager_called["value"] = True
+            return torch.zeros_like(q)
+
+        monkeypatch.setattr(sparse_module, "flex_attention", _eager_stub)
+
+        with pytest.raises(RuntimeError, match="sparse_impl='flex'"):
+            _ = attn.forward(q, k, v)
+
+        assert eager_called["value"] is False
+
+    def test_sparse_impl_auto_warns_and_uses_eager_fallback_on_runtime_compile_failure(
+        self, monkeypatch
+    ):
+        """Auto mode should warn and fallback to eager flex when compiled runtime fails."""
+        B, H, T, Dh = 1, 1, 8, 8
+        cfg = AttentionConfig(
+            backend="sparse", window_size=4, expander_degree=2, sparse_impl="auto"
+        )
+        attn = SparseAttention(cfg)
+
+        q = torch.randn(B, H, T, Dh)
+        k = torch.randn(B, H, T, Dh)
+        v = torch.randn(B, H, T, Dh)
+
+        monkeypatch.setattr(attn, "_supports_fused_sparse", lambda *_args, **_kwargs: True)
+        monkeypatch.setattr(attn, "_get_fused_block_mask", lambda **_kwargs: object())
+
+        def _compiled_fail(*_args, **_kwargs):
+            raise RuntimeError("compiled runtime failure")
+
+        monkeypatch.setattr(attn, "_get_fused_attention_fn", lambda: _compiled_fail)
+        monkeypatch.setattr(attn, "_compile_flex_attention", lambda *, dynamic: _compiled_fail)
+        attn._fused_compile_dynamic = False
+
+        eager_called = {"value": False}
+
+        def _eager_stub(q_in, *_args, **_kwargs):
+            eager_called["value"] = True
+            return torch.zeros_like(q_in)
+
+        monkeypatch.setattr(sparse_module, "flex_attention", _eager_stub)
+
+        with pytest.warns(RuntimeWarning, match="falling back to eager flex_attention"):
+            out = attn.forward(q, k, v)
+
+        assert out.shape == (B, H, T, Dh)
+        assert eager_called["value"] is True

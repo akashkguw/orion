@@ -19,6 +19,8 @@ class StepMetrics:
     grad_norm: float
     grad_clipped: bool
     diverged: bool = False
+    loss_spike: bool = False
+    grad_norm_spike: bool = False
     step_time_ms: float = 0.0
     accuracy_top1: float = 0.0
     learning_rate: float = 0.0
@@ -38,6 +40,9 @@ class WindowMetrics:
     valid_neighbor_fraction: float = 0.0
     attention_mass_window_pct: float = 0.0
     attention_mass_expander_pct: float = 0.0
+    attn_score_mean: float = 0.0
+    spike_rate: float = 0.0
+    attention_entropy_collapse: bool = False
 
 
 @dataclass
@@ -49,6 +54,9 @@ class RunMetrics:
     compute_proxy_per_token: int
     compute_proxy_per_seq: int
     compute_proxy_per_step: int
+    qk_norm: bool = False
+    ortho_init: bool = False
+    spectral_norm: bool = False
 
 
 @dataclass
@@ -68,6 +76,7 @@ class MetricsTracker:
     def __init__(self, window_size: int = 50):
         self.window_size = window_size
         self.diverged_steps = deque(maxlen=window_size)
+        self.spike_steps = deque(maxlen=window_size)
         self.vram_peaks = deque(maxlen=window_size)
         self.activation_norms = deque(maxlen=window_size)
         self.attention_entropies = deque(maxlen=window_size)
@@ -75,6 +84,8 @@ class MetricsTracker:
         self.valid_neighbor_fractions = deque(maxlen=window_size)
         self.attention_mass_window = deque(maxlen=window_size)
         self.attention_mass_expander = deque(maxlen=window_size)
+        self.loss_history = deque(maxlen=window_size)
+        self.grad_norm_history = deque(maxlen=window_size)
 
     def compute_throughput(self, batch_size: int, seq_len: int, step_time_sec: float) -> float:
         """Compute throughput in tokens/sec.
@@ -105,6 +116,29 @@ class MetricsTracker:
         return (
             math.isnan(loss) or math.isinf(loss) or math.isnan(grad_norm) or math.isinf(grad_norm)
         )
+
+    def detect_spike(
+        self,
+        value: float,
+        history: deque[float],
+        *,
+        min_history: int = 10,
+        sigma: float = 3.0,
+    ) -> bool:
+        """Detect a sudden upward spike relative to recent history."""
+        if not math.isfinite(value):
+            return False
+        finite_hist = [v for v in history if math.isfinite(v)]
+        if len(finite_hist) < min_history:
+            return False
+        mean = sum(finite_hist) / len(finite_hist)
+        var = sum((v - mean) ** 2 for v in finite_hist) / len(finite_hist)
+        std = math.sqrt(var)
+        if std <= 1e-12:
+            if mean <= 0:
+                return value > 0
+            return value > (1.5 * mean)
+        return value > (mean + sigma * std)
 
     def compute_activation_norm(self, residual_output: torch.Tensor) -> float:
         """Compute RMS of residual stream activations.
@@ -229,6 +263,9 @@ class MetricsTracker:
         ppl = math.exp(min(loss, 100.0))  # Clamp to avoid overflow
         grad_clipped = grad_norm > 1.0
         diverged = self.check_divergence(loss, grad_norm)
+        loss_spike = self.detect_spike(loss, self.loss_history)
+        grad_norm_spike = self.detect_spike(grad_norm, self.grad_norm_history)
+        any_spike = loss_spike or grad_norm_spike
 
         if diverged:
             self.diverged_steps.append(1)
@@ -240,6 +277,10 @@ class MetricsTracker:
         else:
             self.clipped_steps.append(0)
 
+        self.spike_steps.append(1 if any_spike else 0)
+        self.loss_history.append(loss)
+        self.grad_norm_history.append(grad_norm)
+
         return StepMetrics(
             step=step,
             loss=loss,
@@ -248,6 +289,8 @@ class MetricsTracker:
             grad_norm=grad_norm,
             grad_clipped=grad_clipped,
             diverged=diverged,
+            loss_spike=loss_spike,
+            grad_norm_spike=grad_norm_spike,
             step_time_ms=step_time_ms,
             accuracy_top1=accuracy_top1,
             learning_rate=learning_rate,
@@ -264,6 +307,8 @@ class MetricsTracker:
         valid_neighbor_fraction: float = 0.0,
         attention_mass_window_pct: float = 0.0,
         attention_mass_expander_pct: float = 0.0,
+        attn_score_mean: float = 0.0,
+        attention_entropy_collapse: bool = False,
     ) -> WindowMetrics:
         """Record windowed metrics (every 50 steps).
 
@@ -296,6 +341,7 @@ class MetricsTracker:
         # Compute clip rate over window
         if not clip_rate and self.clipped_steps:
             clip_rate = sum(self.clipped_steps) / len(self.clipped_steps)
+        spike_rate = sum(self.spike_steps) / len(self.spike_steps) if self.spike_steps else 0.0
 
         return WindowMetrics(
             step=step,
@@ -308,22 +354,30 @@ class MetricsTracker:
             valid_neighbor_fraction=valid_neighbor_fraction,
             attention_mass_window_pct=attention_mass_window_pct,
             attention_mass_expander_pct=attention_mass_expander_pct,
+            attn_score_mean=attn_score_mean,
+            spike_rate=spike_rate,
+            attention_entropy_collapse=attention_entropy_collapse,
         )
 
     def record_run_metrics(
         self,
         step: int,
-        window_size: int,
-        expander_degree: int,
+        attention_backend: str,
         batch_size: int,
         seq_len: int,
         n_layers: int,
         n_heads: int,
+        window_size: int | None = None,
+        expander_degree: int | None = None,
+        qk_norm: bool = False,
+        ortho_init: bool = False,
+        spectral_norm: bool = False,
     ) -> RunMetrics:
         """Record run-level metrics (logged once per run).
 
         Args:
             step: Step number
+            attention_backend: Attention backend name ("dense" | "window" | "sparse")
             window_size: Attention window size
             expander_degree: Attention expander degree
             batch_size: Batch size
@@ -334,7 +388,19 @@ class MetricsTracker:
         Returns:
             RunMetrics object
         """
-        degree = window_size + expander_degree
+        backend = attention_backend.lower().strip()
+        if backend == "dense":
+            degree = seq_len
+        elif backend == "window":
+            resolved_window = window_size if window_size is not None else 64
+            degree = min(seq_len, max(1, int(resolved_window)))
+        elif backend == "sparse":
+            resolved_window = window_size if window_size is not None else 64
+            resolved_expander = expander_degree if expander_degree is not None else 8
+            degree = min(seq_len, max(1, int(resolved_window))) + max(0, int(resolved_expander))
+        else:
+            degree = seq_len
+
         compute_proxy_per_token = degree
         compute_proxy_per_seq = seq_len * degree
         compute_proxy_per_step = batch_size * n_heads * seq_len * degree
@@ -345,6 +411,9 @@ class MetricsTracker:
             compute_proxy_per_token=compute_proxy_per_token,
             compute_proxy_per_seq=compute_proxy_per_seq,
             compute_proxy_per_step=compute_proxy_per_step,
+            qk_norm=qk_norm,
+            ortho_init=ortho_init,
+            spectral_norm=spectral_norm,
         )
 
     def record_eval_metrics(

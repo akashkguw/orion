@@ -1,0 +1,56 @@
+strict_apples_to_apples: true
+train_tokens_target: 4000000
+
+runner:
+  run_val_eval: true
+  val_eval_batches: 40
+  run_model_only_bench: true
+  bench_warmup: 5
+  bench_iters: 20
+  eval_long_context_batch_size: 1
+  disable_probe_metrics_for_apples_to_apples: true
+  auto_retry_oom: false
+  auto_retry_dense_cuda_fail: false
+  overwrite: false
+  log_every: 10
+  save_every: final
+
+analysis:
+  val_ppl_tolerance: 0.20
+
+seeds:
+  - 123
+
+seq_lens:
+  - 256
+  - 512
+  - 1024
+
+lr_grid:
+  - 0.0003
+
+fixed_batch_by_seq:
+  256: 8
+  512: 4
+  1024: 2
+  2048: 1
+  4096: 1
+
+batch_candidates_by_seq:
+  256: [16, 12, 8, 4]
+  512: [8, 6, 4, 2]
+  1024: [4, 3, 2, 1]
+
+variants:
+  - id: dense
+    config: configs/experiments/variants/dense.yaml
+    backend: dense
+    sparse_tag: dense
+  - id: window_w128
+    config: configs/experiments/variants/window_w128.yaml
+    backend: window
+    sparse_tag: w128
+  - id: sparse_w64_d8
+    config: configs/experiments/variants/sparse_w64_d8.yaml
+    backend: sparse
+    sparse_tag: w64_d8

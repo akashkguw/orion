@@ -1,329 +1,377 @@
 # Orion
 
-A research framework for long-context, decoder-only Transformers with **structured sparse attention** (sliding window + expander edges).
+Orion is a research framework for decoder-only Transformers with three attention regimes:
 
-Orion combines efficient sparse attention patterns with comprehensive metrics tracking to enable research on long-context language models. It provides multiple attention backends (dense, sparse, window), real-time metrics for model health monitoring, and reproducible training with deterministic checkpointing.
+- `dense` (full causal attention)
+- `window` (causal sliding window)
+- `sparse` (window + expander graph), with fused `flex_attention` support
 
-**Key Features:**
-- **Sparse Attention** - O(T·(W+d)) vs O(T²) dense (7x faster on 512 tokens)
-- **Multiple Backends** - Dense, sparse, and window attention
-- **Real Metrics** - Activation norm, attention entropy, long-context eval
-- **Reproducible** - Deterministic training with seed control
-- **Well-tested** - 149 tests covering all components
-- **Production-ready** - Configs for 256-4K context lengths
+It is built for practical long-context experimentation: reproducible configs, robust metrics, ablations, benchmark regression checks, and notebook-driven experiment orchestration.
 
-**Next Steps:**
-- Norm control (QK-norm, orthogonal init, spectral normalization)
-- Stability improvements for long-context training
+## Why Orion
 
-**Quick Links:** [Installation](#installation) | [Quick Start](#quick-start) | [Usage](#usage) | [Development](#development)
+Orion is designed for researchers who want to answer questions like:
 
----
+- Where does sparse attention beat dense in throughput and memory?
+- How does window-only compare with structured sparse at matched token budgets?
+- Do sparse stability controls (QK-norm, ortho init, spectral norm) improve quality/robustness?
 
-## Quick Start
+The repo gives you a full pipeline to run those studies end-to-end.
 
-**Local Setup (5 minutes):**
-```bash
-git clone https://github.com/akashkguw/orion.git && cd orion
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-python -m orion.train --config configs/golden.yaml
-```
+## Core Capabilities
 
-**Google Colab (No Setup):**
-Click to open: [Orion-Master.ipynb](https://colab.research.google.com/github/akashkguw/orion/blob/main/orion.ipynb)
-
----
+- Multi-backend attention: `dense`, `window`, `sparse`
+- Sparse graph attention with deterministic causal index construction
+- Fused sparse path via `torch.nn.attention.flex_attention` (CUDA), plus diagnostics
+- Stability controls for sparse backends:
+  - `qk_norm`
+  - `ortho_init`
+  - `spectral_norm`
+- Structured metrics logging (`metrics.jsonl`) with run/step/window/eval event types
+- Long-context evaluation (`512/1024/2048/4096`) with OOM backoff
+- Config-first research workflow (`configs/experiments/profiles` + `variants`)
+- CI benchmark regression artifact generation (JSON + Markdown)
 
 ## Installation
 
-**Requirements:** Python 3.11+, PyTorch 2.0+, GPU optional (CUDA 11.8+)
+### Requirements
 
-**Setup:**
+- Python `3.11+`
+- PyTorch `2.x`
+- CUDA is optional (required for fused sparse `flex` execution)
+
+### Setup
+
 ```bash
-make dev                    # Development setup (recommended)
-# OR
-pip install -r requirements.txt -r requirements-dev.txt && pip install -e .
+git clone https://github.com/akashkguw/orion.git
+cd orion
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+pip install -e .
 ```
 
-**Verify:**
+### Verify
+
 ```bash
-python -c "import orion; print('Orion installed')"
-make test                   # Run quick test
+python -m pytest -q
 ```
 
----
+## 60-Second Quick Start
 
-## Sparse Attention
+### Smoke train
 
-Sparse attention reduces complexity from **O(T²)** to **O(T·(W+d))** by attending to:
-- **Local Window** - Dense context for nearby tokens
-- **Expander Edges** - Structured long-range connections
-
-**Example (T=512, W=64, d=8):**
-```
-Query at position 100 attends to:
-  Window:   [37-100]           (64 positions)
-  Expander: [99, 96, 89, ...]  (8 positions)
-  Total:    72 positions vs 512 for dense (7.1x speedup)
-```
-
-**Configuration:**
-```yaml
-model:
-  name: orion
-
-attention:
-  backend: sparse
-  window_size: 64        # Local window
-  expander_degree: 8     # Long-range neighbors
-  sparse_impl: flex      # flex-only sparse execution
-  sparse_block_size: 128 # Block size for flex backend
-```
-
-`sparse_impl` modes:
-- `flex`: Require fused sparse path (raise if unavailable).
-
-**When to Use:**
-| Scenario | Recommendation |
-|----------|---|
-| Long sequences (512+) | Use sparse |
-| Limited GPU memory | Use sparse |
-| Short sequences (<256) | Dense is simpler |
-
-For details, see [SPARSE_ATTENTION_ARCHITECTURE.md](SPARSE_ATTENTION_ARCHITECTURE.md)
-
-## Norm Control (Next Step)
-
-Planned stability improvements for long-context training:
-- **QK-Norm** - Query-Key normalization for attention stability
-- **Orthogonal Init** - Orthogonal weight initialization
-- **Spectral Normalization** - Spectral norm regularization
-
-These techniques help prevent gradient explosion and improve training stability for very long sequences (4K+ tokens).
-
----
-
-## Usage
-
-**Training:**
 ```bash
-python -m orion.train --config configs/golden.yaml
-python -m orion.train --config configs/golden.yaml --resume  # Resume from latest
+SMOKE_TEST=true SMOKE_STEPS=20 python -m orion.train --config configs/golden.yaml
 ```
 
-**Evaluation:**
+### Evaluate
+
 ```bash
 python -m orion.eval --config configs/golden.yaml --checkpoint runs/latest/checkpoint.pt
 ```
 
-**View Metrics:**
+### Inspect metrics
+
 ```bash
-tail -n 5 runs/latest/metrics.jsonl                    # Last 5 steps
-cat runs/latest/metrics.jsonl | jq .                   # Pretty print
-cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract field
+tail -n 10 runs/latest/metrics.jsonl
 ```
 
-**Available Configs:**
-- `golden.yaml` - Dense attention baseline
-- `exp_sparse_smoke.yaml` - Sparse attention (quick test)
-- `exp_sparse_window_256.yaml` - Sparse with larger window
-- `tinyshakespeare_*.yaml` - Various configurations
+## Attention Backends
 
-**Configuration Example:**
+| Backend | Mechanism | Typical Complexity | Notes |
+|---|---|---:|---|
+| `dense` | Full causal attention | `O(T^2)` | Strong short-context baseline; can become memory-heavy at long context |
+| `window` | Causal sliding window | `O(T * W)` | Local-context-only approximation; fast and simple |
+| `sparse` | Window + expander edges | `O(T * (W + d))` | Captures local + structured long-range context |
+
+### ORION sparse algorithm (index construction + guarantees)
+
+For sequence length `T`, window size `W`, expander degree `d`, and head `h`, ORION builds sparse neighbors per query token `q` (0-indexed):
+
+1. Window neighbors:
+   - `N_window(q) = {k | max(0, q-W+1) <= k <= q}`
+2. Expander candidates (deterministic, causal):
+   - generate `d` head-specific offsets
+   - convert each offset to `k = q - offset`
+   - keep only valid causal keys (`0 <= k <= q`)
+   - drop duplicates and keys already in `N_window(q)`
+3. Final sparse neighborhood:
+   - `N_sparse(h, q) = N_window(q) U N_expander(h, q)`
+   - cardinality is at most `W + d` (and smaller near sequence start)
+
+This index set is used directly to build sparse block connectivity for fused `flex_attention` execution.
+
+#### Causal guarantees
+
+- Strict causality: every selected key satisfies `k <= q`
+- In-range keys only: `0 <= k < T`
+- Duplicate-safe neighborhood (after deduplication)
+- Early-token cap respected automatically (`|N_sparse(h, q)| <= q+1`)
+
+#### Complexity
+
+- Dense attention comparisons per head: `O(T^2)`
+- ORION sparse comparisons per head: `O(T * (W + d))`
+- With fixed `W` and `d`, sequence scaling is linear in `T`
+
+### What is new in ORION sparse vs common sparse patterns
+
+- Versus `window`-only:
+  - window-only uses local neighbors only (`O(T*W)`), which can miss long-range links.
+  - ORION adds deterministic expander edges on top of the window (`O(T*(W+d))`) to preserve locality and add structured long-range access.
+- Versus random/global sparse:
+  - random sparse uses stochastic links (higher seed-to-seed variance).
+  - global-token sparse relies on special global tokens or task-specific global routing.
+  - ORION uses deterministic, per-head, per-query causal expander links without requiring global tokens, making runs reproducible and config-driven.
+
+### Sparse execution modes (`attention.sparse_impl`)
+
+- `flex`: require fused sparse path
+- `auto`: try fused sparse, fallback to reference path when unavailable
+- `gather`: force reference gather/scatter path
+
+For research comparisons in this repo, sparse experiment configs are set to `flex`.
+
+### Important runtime constraint for `flex`
+
+Current fused sparse path requires:
+
+- CUDA device
+- `torch.nn.attention.flex_attention` availability
+- intrinsic sparse causal masking path (no external `attn_mask`)
+
+If these conditions are not met and `sparse_impl: flex` is requested, training raises by design.
+
+## Stability Controls (Sparse-Only)
+
+Stability toggles are applied only when `attention.backend: sparse`.
+
 ```yaml
-run:
-  out_dir: runs/exp_shakespeare_dense
-  seed: 123
-  steps: 1000
-  log_every: 10
-  save_every: 100
-
-data:
-  dataset: tinyshakespeare
-  seq_len: 256
-  batch_size: 16
-
-model:
-  name: orion
-  d_model: 256
-  n_layers: 4
-  n_heads: 4
-
-attention:
-  backend: sparse
-  window_size: 64
-  expander_degree: 8
-  sparse_impl: flex
-  sparse_block_size: 128
-
-optim:
-  lr: 3e-4
+stability:
+  qk_norm: true
+  ortho_init: false
+  spectral_norm: false
 ```
 
-## Metrics
+- `qk_norm`: RMSNorm on per-head Q/K before dot product
+- `ortho_init`: orthogonal init for attention projections
+- `spectral_norm`: spectral norm wrapper on Q/K projections
 
-Orion logs detailed metrics at multiple frequencies:
+The run log records which controls were effectively active.
 
-**Every Step:**
-- `loss`, `ppl`, `throughput_tokens_per_sec`, `grad_norm`, `diverged`
+## Metrics and Telemetry
 
-**Every 50 Steps:**
-- `vram_peak_mib`, `divergence_rate`, `activation_norm_rms`, `attention_entropy`, `attention_entropy_normalized`
+Orion writes JSONL metrics to `{run_dir}/metrics.jsonl`.
 
-**Once Per Run:**
-- `attention_degree`, `compute_proxy_per_token`, `compute_proxy_per_seq`, `compute_proxy_per_step`
+### Event types
 
-**Every 1000 Steps:**
-- `eval_ppl_512`, `eval_ppl_1024`, `eval_ppl_2048`, `eval_ppl_4096`
+- `type: run` (once)
+- `type: step` (every step)
+- `type: window` (every 50 steps)
+- `type: eval` (every 1000 steps)
 
-**Format:** All metrics logged to `{run_dir}/metrics.jsonl` (JSONL = JSON Lines):
-```json
-{"type": "run_metrics", "step": 1, "attention_degree": 72, ...}
-{"type": "step", "step": 1, "loss": 5.73, "ppl": 307.56, ...}
-{"type": "window", "step": 50, "vram_peak_mib": 2048, ...}
-{"type": "eval", "step": 1000, "eval_ppl_512": 12.5, ...}
+### Key fields
+
+- Step-level:
+  - `loss`, `ppl`, `throughput_tokens_per_sec`, `grad_norm`, `step_time_ms`, `accuracy_top1`, `learning_rate`
+- Window-level:
+  - `vram_peak_mib`, `divergence_rate`, `activation_norm_rms`, `attention_entropy`, `attention_entropy_normalized`, `attn_score_mean`, `clip_rate`, `spike_rate`
+- Sparse-only diagnostics (when sparse backend is active):
+  - `valid_neighbor_fraction`
+  - `attention_mass_window_pct`, `attention_mass_expander_pct`
+  - `future_neighbor_slots`, `duplicate_neighbor_slots`
+  - `valid_neighbor_fraction_causal_cap`, `valid_neighbor_fraction_vs_causal_cap`
+
+Unavailable metrics are logged/printed as `NA` rather than misleading zeros.
+
+## Config-First Experiment Framework
+
+The experiment workflow is config-driven, with execution handled by `orion.experiments`.
+
+### Experiment structure
+
+- Profiles: `configs/experiments/profiles/*.yaml`
+- Variant arms: `configs/experiments/variants/*.yaml`
+
+### Supported profile presets
+
+- `pilot9`: fast 9-run dense/window/sparse sanity
+- `pilot`: broader sweep
+- `full`: longer-context sweep
+- `pilot_norm`: sparse+norm vs window vs dense
+- `w64_d_sweep`: fixed `w=64` and increasing sparse degree (`d=8,16,32,64,128,256`)
+
+### Run in notebook
+
+Open [`experiment.ipynb`](./experiment.ipynb), then set:
+
+```python
+PROFILE = "pilot9"  # or pilot, full, pilot_norm, w64_d_sweep
 ```
 
-For details, see [COMPREHENSIVE_METRICS_GUIDE.md](COMPREHENSIVE_METRICS_GUIDE.md)
+The notebook is intentionally thin:
+- it selects a profile
+- calls `orion.experiments.run_profile(PROFILE)`
+- reads `summary.csv`
+- runs paired analysis/plots
 
-## Project Structure
+All sweep knobs live in profile YAML (`runner.*`, `analysis.*`, `variants[]`).
 
+### Run from CLI (no notebook)
+
+```bash
+python -m orion.experiments --profile pilot9
 ```
+
+This writes:
+- `runs/<experiment_id>/summary.csv`
+- `runs/<experiment_id>/hardware_meta.json`
+- `configs/generated/<experiment_id>/<trial_id>/config.yaml`
+
+## Training, Evaluation, and Run Orchestration
+
+### Direct training
+
+```bash
+python -m orion.train --config configs/tinyshakespeare_dense.yaml
+python -m orion.train --config configs/tinyshakespeare_window.yaml
+python -m orion.train --config configs/tinyshakespeare_sparse.yaml
+```
+
+### Resume
+
+```bash
+python -m orion.train --config configs/tinyshakespeare_sparse.yaml --resume
+```
+
+### Environment-aware orchestrator (`orion.run`)
+
+```bash
+python -m orion.run --config configs/tinyshakespeare_sparse.yaml --mode both
+```
+
+`orion.run` writes:
+
+- resolved config snapshot
+- run metadata (`meta.json`)
+- optional eval output (`eval.json`)
+
+and supports explicit `--base-dir`, `--run-id`, and `--steps` overrides.
+
+## Ablation Matrix (Sparse Stability)
+
+Run full 8-combo ablations:
+
+```bash
+python -m orion.ablation --config configs/ablation_sparse_a.yaml
+python -m orion.ablation --config configs/ablation_sparse_b.yaml
+```
+
+Or run both and summarize winners:
+
+```bash
+python -m orion.ablation --top2
+```
+
+Outputs include:
+
+- `runs/ablation_summary_<config>.json`
+- `runs/ablation_summary.json`
+- `runs/ablation_top2_summary.json`
+
+## CI Benchmark Regression
+
+Run minimal regression benchmark:
+
+```bash
+python -m orion.benchmark_regression \
+  --out-dir runs/ci_benchmark \
+  --device cpu \
+  --steps 50 \
+  --seq-len 128 \
+  --batch-size 4
+```
+
+Outputs:
+
+- `runs/ci_benchmark/benchmark_summary.json`
+- `runs/ci_benchmark/benchmark_summary.md`
+
+Note: on CPU, sparse with `sparse_impl=flex` is expected to be marked `skipped` in the benchmark summary.
+
+## Colab Workflow
+
+- Notebook: [`orion.ipynb`](./orion.ipynb)
+- Experiment harness: [`experiment.ipynb`](./experiment.ipynb)
+
+Recommended for reproducibility:
+
+1. Mount Drive
+2. Keep configs in-repo (`configs/experiments/...`)
+3. Save outputs to run-specific directories
+4. Use fixed token budgets for apples-to-apples backend comparisons
+
+## Developer Workflow
+
+```bash
+make dev
+make lint
+make format-check
+make test
+make smoke
+```
+
+Current CI jobs (`.github/workflows/ci.yml`):
+
+1. Lint + format checks
+2. Unit tests
+3. Smoke training
+4. Benchmark regression artifact upload
+
+## Project Layout
+
+```text
 orion/
-├── attention/              # Attention mechanisms (dense, sparse, window)
-├── data/                   # Data loading (Shakespeare dataset)
-├── models/                 # Model components (transformer blocks)
-├── model.py                # Main models (TinyDecoderOnly, OrionDecoder)
-├── config.py               # Configuration loading
-├── train.py                # Training loop with metrics
-├── eval.py                 # Evaluation at long contexts
-├── metrics.py              # Metrics tracking system
-├── logging_utils.py        # JSONL metrics logging
-└── train_utils.py          # Training utilities
+  attention/
+    base.py
+    dense.py
+    window.py
+    sparse.py
+  data/
+    shakespeare.py
+  models/
+    blocks.py
+  model.py
+  models_factory.py
+  train.py
+  eval.py
+  ablation.py
+  benchmark_regression.py
+  metrics.py
+  stability.py
+  run.py
 
-configs/                     # Training configurations
-tests/                       # 152 tests (sparse, dense, metrics, models)
-runs/                        # Training outputs (checkpoints, metrics)
+configs/
+  golden.yaml
+  tinyshakespeare_*.yaml
+  ablation_sparse_*.yaml
+  experiments/
+    profiles/
+    variants/
 ```
 
-## Logging & Checkpoints
+## Notes and Caveats
 
-**Run Directory:**
-```
-runs/
-├── latest/                 # Most recent run
-│   ├── checkpoint.pt      # Model weights + optimizer state
-│   └── metrics.jsonl      # Training metrics
-├── exp_shakespeare_dense/  # Named experiment
-└── exp_sparse_smoke/       # Another experiment
-```
-
-**Checkpoint Format:**
-```python
-{
-    "model": model.state_dict(),      # Model weights
-    "opt": optimizer.state_dict(),    # Optimizer state
-    "step": 100,                      # Training step
-    "seed": 123,                      # Random seed
-    "config": cfg.raw,                # Full config dict
-}
-```
-
-**Load Checkpoint:**
-```python
-import torch
-ckpt = torch.load("runs/latest/checkpoint.pt", map_location="cpu")
-model.load_state_dict(ckpt["model"])
-seed = ckpt["seed"]
-```
-
-## Testing
-
-**Run Tests:**
-```bash
-make test                   # All 149 tests
-pytest tests/test_sparse_attention.py -v  # Specific file
-pytest --cov=orion tests/   # With coverage
-make smoke                  # Quick 5-step test
-```
-
-## Development
-
-**Setup:**
-```bash
-make dev                    # Install dev dependencies
-```
-
-**Commands:**
-```bash
-make train                  # Full training (configs/golden.yaml)
-make smoke                  # Quick 5-step test
-make test                   # Run all 149 tests
-make lint                   # Lint check (ruff)
-make format                 # Auto-format code
-make format-check           # Check formatting
-make eval                   # Evaluate checkpoint
-```
-
-**Training Examples:**
-```bash
-# Default config
-python -m orion.train --config configs/golden.yaml
-
-# Custom parameters
-python -m orion.train --config configs/golden.yaml --save-every 50
-
-# Resume from latest
-python -m orion.train --config configs/golden.yaml --resume
-
-# Different models/attention
-python -m orion.train --config configs/exp_sparse_smoke.yaml
-python -m orion.train --config configs/exp_window_256.yaml
-```
-
-**Metrics Inspection:**
-```bash
-tail -n 5 runs/latest/metrics.jsonl                    # Last 5 steps
-cat runs/latest/metrics.jsonl | jq .                   # Pretty print
-cat runs/latest/metrics.jsonl | jq 'select(.type == "step") | .loss'  # Extract field
-```
-
-**Code Quality:**
-- Linter: Ruff (E, F, I, B, UP rules)
-- Formatter: Ruff format
-- Type Checking: Full type annotations
-- Tests: 152 tests (sparse, dense, metrics, models)
-- Python: 3.11+
-
-**CI Pipeline:**
-```bash
-make test lint format-check  # Local CI (before commit)
-```
-
-GitHub Actions runs on every PR:
-1. Lint & Format checks
-2. Full test suite (152 tests)
-3. Smoke test (5-step training)
-
----
-
-## Contributing
-
-**To contribute:**
-1. Fork the repo and create a branch: `git checkout -b my-feature main`
-2. Make changes and test: `make test lint format-check`
-3. Push and create a PR
-4. Wait for CI checks to pass
-
-**Code Style:**
-- Follow PEP 8
-- Use type annotations
-- Add docstrings
-- Keep functions focused
-
----
+- Fused sparse (`flex`) is CUDA-dependent.
+- Dense long-context eval may OOM at large context + batch; evaluator includes batch backoff.
+- `window` and fused `sparse` attention entropy/mass may use probe-based estimation depending on config.
+- Local visualization scripts under `orion/local_attention_viz/` are intended for local runs and are git-ignored as artifacts.
 
 ## License
 
 Apache-2.0
+
+## Contact
+
+For research collaboration, questions, or feedback: **akashkg@uw.edu**

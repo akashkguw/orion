@@ -43,3 +43,21 @@ jobs:
         env:
           SMOKE_TEST: "true"
           SMOKE_STEPS: "20"
+
+  benchmark_regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -U pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pip install -e .
+      - run: python -m orion.benchmark_regression --out-dir runs/ci_benchmark --device cpu --steps 50 --seq-len 128 --batch-size 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-benchmark-summary
+          path: |
+            runs/ci_benchmark/benchmark_summary.json
+            runs/ci_benchmark/benchmark_summary.md

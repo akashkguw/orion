@@ -120,14 +120,20 @@ class SparseAttention:
         self.cfg = cfg
         self.window_size = max(1, cfg.window_size or 64)  # Ensure window_size >= 1
         self.expander_degree = cfg.expander_degree or 8
-        self.sparse_impl = (cfg.sparse_impl or "auto").lower()
+        self.sparse_impl = (cfg.sparse_impl or "flex").lower()
         self.sparse_block_size = max(16, int(cfg.sparse_block_size or 128))
+        self.sparse_probe_every = max(0, int(getattr(cfg, "sparse_probe_every", 0) or 0))
+        self.sparse_probe_tokens = max(16, int(getattr(cfg, "sparse_probe_tokens", 256) or 256))
         self.indices_cache: dict[tuple, torch.Tensor] = {}
         self.indices_per_head_cache: dict[tuple, torch.Tensor] = {}
         self.block_mask_cache: dict[tuple, torch.Tensor] = {}
         self._fused_attention_fn = None
+        self._fused_compile_dynamic: bool | None = None
         self._warned_fallback = False
         self._warned_compile_fallback = False
+        self._warned_static_compile_fallback = False
+        self._warned_probe_failure = False
+        self._forward_calls = 0
         self.last_attn_weights: torch.Tensor | None = None  # Store for metrics
         self.last_attn_entropy: float = 0.0
         self.last_attn_entropy_normalized: float = 0.0
@@ -136,6 +142,7 @@ class SparseAttention:
         self.last_valid_neighbor_fraction_vs_causal_cap: float = 0.0
         self.last_attention_mass_window_pct: float = 0.0
         self.last_attention_mass_expander_pct: float = 0.0
+        self.last_attn_score_mean: float = float("nan")
         self.last_total_neighbor_slots: int = 0
         self.last_valid_neighbor_slots: int = 0
         self.last_invalid_neighbor_slots: int = 0
@@ -260,11 +267,12 @@ class SparseAttention:
         if cache_key in self.block_mask_cache:
             return self.block_mask_cache[cache_key]
 
-        # Build exact token-level adjacency for mask_mod lookup.
-        # This keeps mask_mod pointwise/index-only (no reductions), which is
-        # required for robust Inductor lowering in flex attention.
+        # Build block-level adjacency from sparse indices:
+        # [H, T, degree] -> [H, n_blocks, n_blocks].
+        # This avoids allocating a dense [H, T, T] tensor in the mask builder.
         degree = indices_per_head.shape[-1]
-        adjacency = torch.zeros((H, T, T), dtype=torch.bool, device=device)
+        block_count = (T + self.sparse_block_size - 1) // self.sparse_block_size
+        adjacency = torch.zeros((H, block_count, block_count), dtype=torch.bool, device=device)
         valid = indices_per_head >= 0
         if valid.any():
             h_idx = torch.arange(H, device=device, dtype=torch.long)[:, None, None].expand(
@@ -273,10 +281,17 @@ class SparseAttention:
             q_idx = torch.arange(T, device=device, dtype=torch.long)[None, :, None].expand(
                 H, T, degree
             )
-            adjacency[h_idx[valid], q_idx[valid], indices_per_head[valid]] = True
+            q_block = torch.div(q_idx, self.sparse_block_size, rounding_mode="floor")
+            k_block = torch.div(
+                indices_per_head.clamp(min=0), self.sparse_block_size, rounding_mode="floor"
+            )
+            adjacency[h_idx[valid], q_block[valid], k_block[valid]] = True
 
         def mask_mod(b, h, q_idx, kv_idx):
-            return adjacency[h, q_idx, kv_idx]
+            q_block = torch.div(q_idx, self.sparse_block_size, rounding_mode="floor")
+            kv_block = torch.div(kv_idx, self.sparse_block_size, rounding_mode="floor")
+            # Keep intrinsic causality even with block-level sparsity.
+            return adjacency[h, q_block, kv_block] & (kv_idx <= q_idx)
 
         block_mask = create_block_mask(
             mask_mod,
@@ -290,26 +305,58 @@ class SparseAttention:
         self.block_mask_cache[cache_key] = block_mask
         return block_mask
 
+    def _compile_flex_attention(self, *, dynamic: bool):
+        """Compile flex_attention with requested dynamic-shape setting."""
+        assert flex_attention is not None
+        return torch.compile(flex_attention, dynamic=dynamic)
+
     def _get_fused_attention_fn(self):
         """Get a compiled fused sparse attention function (cached)."""
         if self._fused_attention_fn is not None:
             return self._fused_attention_fn
-        assert flex_attention is not None
+        dynamic_error: Exception | None = None
         try:
-            self._fused_attention_fn = torch.compile(flex_attention, dynamic=True)
+            self._fused_attention_fn = self._compile_flex_attention(dynamic=True)
+            self._fused_compile_dynamic = True
         except Exception as e:
+            dynamic_error = e
+            try:
+                self._fused_attention_fn = self._compile_flex_attention(dynamic=False)
+                self._fused_compile_dynamic = False
+                if not self._warned_static_compile_fallback:
+                    warnings.warn(
+                        "Dynamic compile for flex_attention failed; using static compiled "
+                        "flex_attention instead.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    self._warned_static_compile_fallback = True
+            except Exception as static_error:
+                self._fused_compile_dynamic = None
+                self._fused_attention_fn = None
+                assert dynamic_error is not None
+                detail = (
+                    "Failed to compile fused sparse kernel with torch.compile. "
+                    f"dynamic=True error: {type(dynamic_error).__name__}: {dynamic_error}; "
+                    f"dynamic=False error: {type(static_error).__name__}: {static_error}"
+                )
+                raise RuntimeError(detail) from static_error
+        if self._fused_attention_fn is None:
             raise RuntimeError(
-                f"Failed to compile fused sparse kernel with torch.compile: {type(e).__name__}: {e}"
-            ) from e
+                "Internal error: fused attention function was not initialized after compile."
+            )
         return self._fused_attention_fn
 
     def _set_unavailable_weight_metrics(self) -> None:
         """Set weight-derived metrics when fused path does not expose attention weights."""
         self.last_attn_weights = None
-        self.last_attn_entropy = 0.0
-        self.last_attn_entropy_normalized = 0.0
-        self.last_attention_mass_window_pct = 0.0
-        self.last_attention_mass_expander_pct = 0.0
+        self.last_attn_score_mean = float("nan")
+        # Fused flex_attention does not expose per-edge attention weights, so these
+        # metrics are unavailable (not zero).
+        self.last_attn_entropy = float("nan")
+        self.last_attn_entropy_normalized = float("nan")
+        self.last_attention_mass_window_pct = float("nan")
+        self.last_attention_mass_expander_pct = float("nan")
         # Preserve structural valid-neighbor diagnostics for logging.
         self.last_valid_neighbor_fraction = (
             self.last_valid_neighbor_slots / self.last_total_neighbor_slots
@@ -322,6 +369,105 @@ class SparseAttention:
             )
         else:
             self.last_valid_neighbor_fraction_vs_causal_cap = 0.0
+
+    def _compute_weight_only_metrics(
+        self, attn_weights: torch.Tensor, *, window_slot_mask: torch.Tensor | None = None
+    ) -> None:
+        """Compute entropy and mass split from attention weights without altering index diagnostics."""
+        import math
+
+        if attn_weights.numel() == 0:
+            self.last_attn_entropy = float("nan")
+            self.last_attn_entropy_normalized = float("nan")
+            self.last_attention_mass_window_pct = float("nan")
+            self.last_attention_mass_expander_pct = float("nan")
+            return
+
+        degree = attn_weights.shape[-1]
+        attn_weights_safe = torch.clamp(attn_weights, min=1e-10)
+        entropy = -(attn_weights * torch.log(attn_weights_safe)).sum(dim=-1).mean().item()
+        max_entropy = math.log(degree) if degree > 1 else 1.0
+        entropy_normalized = entropy / max_entropy if max_entropy > 0 else float("nan")
+
+        if window_slot_mask is None:
+            window_mass = attn_weights[..., : self.window_size].sum(dim=-1).mean().item()
+            expander_mass = attn_weights[..., self.window_size :].sum(dim=-1).mean().item()
+        else:
+            window_mask_f = window_slot_mask.to(dtype=attn_weights.dtype)
+            expander_mask_f = (~window_slot_mask).to(dtype=attn_weights.dtype)
+            window_mass = (attn_weights * window_mask_f).sum(dim=-1).mean().item()
+            expander_mass = (attn_weights * expander_mask_f).sum(dim=-1).mean().item()
+
+        total = window_mass + expander_mass
+        if total > 0:
+            window_pct = 100.0 * window_mass / total
+            expander_pct = 100.0 * expander_mass / total
+        else:
+            window_pct = float("nan")
+            expander_pct = float("nan")
+
+        self.last_attn_entropy = entropy
+        self.last_attn_entropy_normalized = entropy_normalized
+        self.last_attention_mass_window_pct = window_pct
+        self.last_attention_mass_expander_pct = expander_pct
+
+    def _maybe_probe_weight_metrics(
+        self, q: torch.Tensor, k: torch.Tensor, *, indices_per_head: torch.Tensor
+    ) -> None:
+        """Periodically estimate weight-derived metrics on a small gather probe."""
+        self._forward_calls += 1
+        if self.sparse_probe_every <= 0:
+            return
+        if self._forward_calls % self.sparse_probe_every != 0:
+            return
+
+        B, H, T, Dh = q.shape
+        probe_t = min(T, self.sparse_probe_tokens)
+        if probe_t <= 0:
+            return
+
+        degree = indices_per_head.shape[-1]
+        try:
+            with torch.no_grad():
+                q_probe = q[:, :, :probe_t, :].detach()
+                k_probe = k[:, :, :probe_t, :].detach()
+                indices_probe = indices_per_head[:, :probe_t, :]
+
+                indices_expanded = indices_probe[None, :, :, :].expand(B, H, probe_t, degree)
+                indices_flat = indices_expanded.reshape(B * H, probe_t, degree)
+                indices_clamped = indices_flat.clamp(min=0)
+
+                k_flat = k_probe.reshape(B * H, probe_t, Dh)
+                indices_for_gather = indices_clamped[:, :, :, None].expand(
+                    B * H, probe_t, degree, Dh
+                )
+                k_sparse = torch.gather(
+                    k_flat[:, :, None, :].expand(B * H, probe_t, degree, Dh),
+                    dim=1,
+                    index=indices_for_gather,
+                ).reshape(B, H, probe_t, degree, Dh)
+
+                scale = Dh**-0.5
+                scores = torch.einsum("bhtd,bhtpd->bhtp", q_probe, k_sparse) * scale
+                validity_mask = (indices_flat >= 0).reshape(B, H, probe_t, degree)
+                scores = scores.masked_fill(~validity_mask, float("-inf"))
+
+                attn_weights = F.softmax(scores, dim=-1)
+                attn_weights = torch.nan_to_num(attn_weights, 0.0)
+                self._compute_weight_only_metrics(
+                    attn_weights,
+                    window_slot_mask=self._build_window_slot_mask(indices_expanded, probe_t),
+                )
+                self.last_attn_weights = None
+        except Exception as e:
+            if not self._warned_probe_failure:
+                warnings.warn(
+                    "Sparse probe metrics failed; keeping attention entropy/mass as NA. "
+                    f"Error: {type(e).__name__}: {e}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                self._warned_probe_failure = True
 
     def _forward_fused(
         self,
@@ -339,20 +485,51 @@ class SparseAttention:
         fused_attention_fn = self._get_fused_attention_fn()
         try:
             output = fused_attention_fn(q, k, v, block_mask=block_mask)
-        except Exception:
-            # Retry once in eager flex mode if compiled flex lowering fails.
-            if flex_attention is None or fused_attention_fn is flex_attention:
+        except Exception as compile_runtime_error:
+            # Dynamic compiled kernels can fail at runtime on some environments.
+            # Retry once with a static compiled kernel before considering eager fallback.
+            if self._fused_compile_dynamic is True:
+                try:
+                    self._fused_attention_fn = self._compile_flex_attention(dynamic=False)
+                    self._fused_compile_dynamic = False
+                    if not self._warned_static_compile_fallback:
+                        warnings.warn(
+                            "Dynamic compiled flex_attention failed at runtime; retrying with "
+                            "static compiled flex_attention.",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                        self._warned_static_compile_fallback = True
+                    output = self._fused_attention_fn(q, k, v, block_mask=block_mask)
+                    self._set_unavailable_weight_metrics()
+                    self._maybe_probe_weight_metrics(q, k, indices_per_head=indices_per_head)
+                    return output
+                except Exception:
+                    # Continue to strict/fallback policy below.
+                    pass
+
+            if self.sparse_impl == "flex":
+                raise RuntimeError(
+                    "Compiled flex_attention failed at runtime while sparse_impl='flex'. "
+                    "No eager fallback is allowed in strict flex mode."
+                ) from compile_runtime_error
+
+            # sparse_impl='auto': retry in eager flex mode if compiled lowering fails.
+            if flex_attention is None:
                 raise
             self._fused_attention_fn = flex_attention
+            self._fused_compile_dynamic = None
             if not self._warned_compile_fallback:
                 warnings.warn(
-                    "Compiled flex_attention failed at runtime; retrying with eager flex_attention.",
+                    "Compiled flex_attention failed at runtime; falling back to eager "
+                    "flex_attention (sparse_impl='auto').",
                     RuntimeWarning,
                     stacklevel=2,
                 )
                 self._warned_compile_fallback = True
             output = self._fused_attention_fn(q, k, v, block_mask=block_mask)
         self._set_unavailable_weight_metrics()
+        self._maybe_probe_weight_metrics(q, k, indices_per_head=indices_per_head)
         return output
 
     def _forward_gather(
@@ -393,6 +570,9 @@ class SparseAttention:
         # Compute attention scores: [B, H, T, degree]
         scale = Dh**-0.5
         scores = torch.einsum("bhtd,bhtpd->bhtp", q, k_sparse) * scale
+
+        # Track mean absolute score for stability monitoring
+        self.last_attn_score_mean = float(scores.detach().abs().mean().item())
 
         # Apply validity mask for invalid indices (-1)
         validity_mask = (indices_flat >= 0).reshape(B, H, T, degree)

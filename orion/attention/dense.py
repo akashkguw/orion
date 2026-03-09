@@ -17,6 +17,7 @@ class DenseAttention:
         self.last_attn_weights: torch.Tensor | None = None  # Store for metrics
         self.last_attn_entropy: float = 0.0
         self.last_attn_entropy_normalized: float = 0.0
+        self.last_attn_score_mean: float = 0.0
         self.causal_mask_cache: dict[tuple, torch.Tensor] = {}  # Cache causal masks
 
     def forward(
@@ -35,6 +36,9 @@ class DenseAttention:
 
         # Compute attention scores: [B, H, T, T]
         scores = torch.einsum("bhtd,bhsd->bhts", q, k) * scale
+
+        # Track mean absolute score for stability monitoring
+        self.last_attn_score_mean = float(scores.detach().abs().mean().item())
 
         # Apply causal mask (cached to avoid reallocation)
         cache_key = (T, str(device))

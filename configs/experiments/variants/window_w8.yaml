@@ -1,0 +1,29 @@
+run:
+  out_dir: runs/exp_window_w8
+  seed: 123
+  steps: 100
+  log_every: 10
+  save_every: 100
+
+data:
+  dataset: tinyshakespeare
+  root: data
+  seq_len: 256
+  batch_size: 8
+
+model:
+  name: orion
+  d_model: 256
+  n_layers: 4
+  n_heads: 4
+  mlp_mult: 4
+
+attention:
+  backend: window
+  window_size: 8
+  window_probe_every: 50
+  window_probe_tokens: 256
+
+optim:
+  lr: 3e-4
+

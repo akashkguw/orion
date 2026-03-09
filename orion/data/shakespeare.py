@@ -122,7 +122,11 @@ def sample_batch(
     """
     n = ids.numel()
     max_start = n - (seq_len + 1)
-    starts = torch.randint(0, max_start, (batch_size,))
+    if max_start < 0:
+        raise ValueError(
+            f"Not enough tokens to sample seq_len={seq_len}: need at least {seq_len + 1}, got {n}"
+        )
+    starts = torch.randint(0, max_start + 1, (batch_size,))
     x = torch.stack([ids[s : s + seq_len] for s in starts], dim=0).to(device)
     y = torch.stack([ids[s + 1 : s + 1 + seq_len] for s in starts], dim=0).to(device)
     return x, y

@@ -15,7 +15,12 @@ class DecoderBlock(nn.Module):
     """
 
     def __init__(
-        self, d_model: int, n_heads: int, attention_cfg: AttentionConfig, mlp_mult: int = 4
+        self,
+        d_model: int,
+        n_heads: int,
+        attention_cfg: AttentionConfig,
+        mlp_mult: int = 4,
+        stability_cfg=None,
     ):
         super().__init__()
         if d_model % n_heads != 0:
@@ -34,6 +39,14 @@ class DecoderBlock(nn.Module):
         self.v_proj = nn.Linear(d_model, d_model)
         self.o_proj = nn.Linear(d_model, d_model)
 
+        # QK-norm: per-head RMSNorm along head_dim for score magnitude control
+        if stability_cfg is not None and stability_cfg.qk_norm:
+            self.q_norm: nn.Module | None = nn.RMSNorm(self.head_dim)
+            self.k_norm: nn.Module | None = nn.RMSNorm(self.head_dim)
+        else:
+            self.q_norm = None
+            self.k_norm = None
+
         # https://d2l.ai/chapter_attention-mechanisms-and-transformers/transformer.html#positionwise-feed-forward-networks
         self.mlp = nn.Sequential(
             nn.Linear(d_model, d_model * mlp_mult),
@@ -49,6 +62,11 @@ class DecoderBlock(nn.Module):
         q = self.q_proj(x).view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(x).view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(x).view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
+
+        # QK-norm: normalize per head before dot product (operates on last dim Dh)
+        if self.q_norm is not None:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
 
         attn_out = self.attn.forward(q, k, v, attn_mask=attn_mask)
 

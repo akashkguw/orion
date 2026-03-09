@@ -172,6 +172,27 @@ class TestMetricsTracker:
 
         assert metrics.diverged is True
 
+    def test_record_step_metrics_spike_detection(self):
+        """Spike flags should trigger on abrupt loss/grad jumps."""
+        tracker = MetricsTracker()
+        for i in range(12):
+            m = tracker.record_step_metrics(
+                step=i + 1,
+                loss=1.0,
+                grad_norm=0.5,
+                throughput=1000.0,
+            )
+            assert m.loss_spike is False
+            assert m.grad_norm_spike is False
+        spike = tracker.record_step_metrics(
+            step=13,
+            loss=20.0,
+            grad_norm=10.0,
+            throughput=1000.0,
+        )
+        assert spike.loss_spike is True
+        assert spike.grad_norm_spike is True
+
     def test_record_window_metrics(self):
         """Test window metrics recording."""
         tracker = MetricsTracker()
@@ -200,6 +221,7 @@ class TestMetricsTracker:
         assert metrics.attention_entropy == 1.5
         assert metrics.attention_entropy_normalized == 0.5
         assert metrics.divergence_rate == 0.0
+        assert metrics.attention_entropy_collapse is False
 
     def test_record_window_metrics_with_divergence(self):
         """Test window metrics with diverged steps."""
@@ -226,11 +248,37 @@ class TestMetricsTracker:
         # 10 out of 50 diverged = 0.2 rate
         assert metrics.divergence_rate == pytest.approx(0.2, rel=1e-5)
 
+    def test_record_window_metrics_spike_rate(self):
+        """Window metrics should expose rolling spike rate."""
+        tracker = MetricsTracker()
+        for i in range(12):
+            tracker.record_step_metrics(
+                step=i + 1,
+                loss=1.0,
+                grad_norm=0.5,
+                throughput=1000.0,
+            )
+        tracker.record_step_metrics(
+            step=13,
+            loss=20.0,
+            grad_norm=0.5,
+            throughput=1000.0,
+        )
+        metrics = tracker.record_window_metrics(
+            step=13,
+            vram_peak_mib=0,
+            activation_norm=0.5,
+            attention_entropy=1.0,
+            attention_entropy_normalized=0.5,
+        )
+        assert metrics.spike_rate > 0.0
+
     def test_record_run_metrics(self):
         """Test run metrics recording."""
         tracker = MetricsTracker()
         metrics = tracker.record_run_metrics(
             step=1,
+            attention_backend="sparse",
             window_size=64,
             expander_degree=8,
             batch_size=16,
@@ -245,6 +293,41 @@ class TestMetricsTracker:
         assert metrics.compute_proxy_per_token == 72
         assert metrics.compute_proxy_per_seq == 256 * 72
         assert metrics.compute_proxy_per_step == 16 * 8 * 256 * 72
+
+    def test_record_run_metrics_dense_backend(self):
+        """Dense backend should use full sequence length as degree proxy."""
+        tracker = MetricsTracker()
+        metrics = tracker.record_run_metrics(
+            step=1,
+            attention_backend="dense",
+            batch_size=4,
+            seq_len=128,
+            n_layers=2,
+            n_heads=4,
+        )
+
+        assert metrics.attention_degree == 128
+        assert metrics.compute_proxy_per_token == 128
+        assert metrics.compute_proxy_per_seq == 128 * 128
+        assert metrics.compute_proxy_per_step == 4 * 4 * 128 * 128
+
+    def test_record_run_metrics_window_backend(self):
+        """Window backend degree should be capped by sequence length."""
+        tracker = MetricsTracker()
+        metrics = tracker.record_run_metrics(
+            step=1,
+            attention_backend="window",
+            window_size=256,
+            batch_size=2,
+            seq_len=64,
+            n_layers=2,
+            n_heads=2,
+        )
+
+        assert metrics.attention_degree == 64
+        assert metrics.compute_proxy_per_token == 64
+        assert metrics.compute_proxy_per_seq == 64 * 64
+        assert metrics.compute_proxy_per_step == 2 * 2 * 64 * 64
 
     def test_record_eval_metrics(self):
         """Test eval metrics recording."""

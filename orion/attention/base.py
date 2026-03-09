@@ -15,9 +15,17 @@ class AttentionConfig:
     # - "auto": use fused sparse kernel when available, else gather path
     # - "gather": always use explicit gather/scatter sparse path
     # - "flex": require fused sparse kernel path
-    sparse_impl: str = "auto"
+    sparse_impl: str = "flex"
     # Block size used by torch flex_attention block masks
     sparse_block_size: int = 128
+    # Optional probe metrics for fused sparse path:
+    # every N forward calls, run a small gather probe to estimate entropy/mass.
+    sparse_probe_every: int = 0
+    sparse_probe_tokens: int = 256
+    # Optional probe metrics for window backend:
+    # every N forward calls, run a bounded probe to estimate entropy/score.
+    window_probe_every: int = 50
+    window_probe_tokens: int = 256
 
 
 class AttentionBackend(Protocol):
