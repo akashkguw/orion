@@ -85,6 +85,46 @@ tail -n 10 runs/latest/metrics.jsonl
 | `window` | Causal sliding window | `O(T * W)` | Local-context-only approximation; fast and simple |
 | `sparse` | Window + expander edges | `O(T * (W + d))` | Captures local + structured long-range context |
 
+### ORION sparse algorithm (index construction + guarantees)
+
+For sequence length `T`, window size `W`, expander degree `d`, and head `h`, ORION builds sparse neighbors per query token `q` (0-indexed):
+
+1. Window neighbors:
+   - `N_window(q) = {k | max(0, q-W+1) <= k <= q}`
+2. Expander candidates (deterministic, causal):
+   - generate `d` head-specific offsets
+   - convert each offset to `k = q - offset`
+   - keep only valid causal keys (`0 <= k <= q`)
+   - drop duplicates and keys already in `N_window(q)`
+3. Final sparse neighborhood:
+   - `N_sparse(h, q) = N_window(q) U N_expander(h, q)`
+   - cardinality is at most `W + d` (and smaller near sequence start)
+
+This index set is used directly to build sparse block connectivity for fused `flex_attention` execution.
+
+#### Causal guarantees
+
+- Strict causality: every selected key satisfies `k <= q`
+- In-range keys only: `0 <= k < T`
+- Duplicate-safe neighborhood (after deduplication)
+- Early-token cap respected automatically (`|N_sparse(h, q)| <= q+1`)
+
+#### Complexity
+
+- Dense attention comparisons per head: `O(T^2)`
+- ORION sparse comparisons per head: `O(T * (W + d))`
+- With fixed `W` and `d`, sequence scaling is linear in `T`
+
+### What is new in ORION sparse vs common sparse patterns
+
+- Versus `window`-only:
+  - window-only uses local neighbors only (`O(T*W)`), which can miss long-range links.
+  - ORION adds deterministic expander edges on top of the window (`O(T*(W+d))`) to preserve locality and add structured long-range access.
+- Versus random/global sparse:
+  - random sparse uses stochastic links (higher seed-to-seed variance).
+  - global-token sparse relies on special global tokens or task-specific global routing.
+  - ORION uses deterministic, per-head, per-query causal expander links without requiring global tokens, making runs reproducible and config-driven.
+
 ### Sparse execution modes (`attention.sparse_impl`)
 
 - `flex`: require fused sparse path
