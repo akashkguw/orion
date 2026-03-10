@@ -12,6 +12,7 @@ from .shakespeare import CharTokenizer
 
 DEFAULT_PG19_DATASET_ID = "deepmind/pg19"
 DEFAULT_PG19_STREAMING = True
+PARQUET_FALLBACK_REVISION = "refs/convert/parquet"
 
 
 def _cache_key(
@@ -33,6 +34,37 @@ def _cache_key(
         json.dumps(key_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return digest[:16]
+
+
+def _normalize_dataset_id(dataset_id: str) -> str:
+    value = dataset_id.strip()
+    lowered = value.lower()
+    if lowered in {"pg19", "pg-19", "deepmind/pg19.py", "pg19.py"}:
+        return DEFAULT_PG19_DATASET_ID
+    if value.endswith(".py"):
+        # Avoid dataset script loading paths with modern datasets versions.
+        stem = Path(value).stem.lower()
+        if stem in {"pg19", "deepmind/pg19"}:
+            return DEFAULT_PG19_DATASET_ID
+    return value or DEFAULT_PG19_DATASET_ID
+
+
+def _load_hf_pg19_dataset(datasets_mod, dataset_id: str, *, streaming: bool):
+    try:
+        return datasets_mod.load_dataset(dataset_id, streaming=streaming), None
+    except RuntimeError as exc:
+        message = str(exc)
+        if "Dataset scripts are no longer supported" not in message:
+            raise
+    # Newer datasets versions reject script-based loading; use parquet conversion branch.
+    return (
+        datasets_mod.load_dataset(
+            dataset_id,
+            streaming=streaming,
+            revision=PARQUET_FALLBACK_REVISION,
+        ),
+        PARQUET_FALLBACK_REVISION,
+    )
 
 
 def _import_hf_datasets():
@@ -129,6 +161,7 @@ def load_pg19(
     The cache hash captures dataset id and truncation options so runs remain reproducible.
     """
     root = Path(root)
+    dataset_id = _normalize_dataset_id(dataset_id)
     cache_dir = (
         root
         / "pg19"
@@ -162,7 +195,11 @@ def load_pg19(
         return train_ids.contiguous(), val_ids.contiguous(), tok
 
     datasets = _import_hf_datasets()
-    dataset_dict = datasets.load_dataset(dataset_id, streaming=streaming)
+    dataset_dict, hf_revision = _load_hf_pg19_dataset(
+        datasets,
+        dataset_id,
+        streaming=streaming,
+    )
     if "train" not in dataset_dict:
         raise ValueError(f"PG-19 dataset {dataset_id!r} has no 'train' split")
 
@@ -200,6 +237,7 @@ def load_pg19(
     torch.save(val_ids, val_ids_path)
     meta = {
         "dataset_id": dataset_id,
+        "hf_revision": hf_revision,
         "text_field": text_field,
         "train_docs": train_docs,
         "val_docs": val_docs,
