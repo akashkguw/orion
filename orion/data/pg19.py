@@ -13,6 +13,7 @@ from .shakespeare import CharTokenizer
 DEFAULT_PG19_DATASET_ID = "deepmind/pg19"
 DEFAULT_PG19_STREAMING = True
 PARQUET_FALLBACK_REVISION = "refs/convert/parquet"
+PG19_MIRROR_DATASET_IDS = ("emozilla/pg19", "Tanushreeeeee/pg19")
 
 
 def _cache_key(
@@ -54,12 +55,15 @@ def _is_script_compat_error(exc: BaseException) -> bool:
 
 
 def _load_hf_pg19_dataset(datasets_mod, dataset_id: str, *, streaming: bool):
-    attempts = [
-        (dataset_id, None),
-        (dataset_id, PARQUET_FALLBACK_REVISION),
-        (DEFAULT_PG19_DATASET_ID, PARQUET_FALLBACK_REVISION),
-        (DEFAULT_PG19_DATASET_ID, None),
-    ]
+    attempts: list[tuple[str, str | None]] = []
+    primary_ids = [dataset_id, DEFAULT_PG19_DATASET_ID]
+    for candidate in primary_ids:
+        attempts.append((candidate, None))
+        attempts.append((candidate, PARQUET_FALLBACK_REVISION))
+
+    for mirror_id in PG19_MIRROR_DATASET_IDS:
+        attempts.append((mirror_id, PARQUET_FALLBACK_REVISION))
+        attempts.append((mirror_id, None))
 
     seen: set[tuple[str, str | None]] = set()
     last_script_exc: BaseException | None = None
@@ -83,7 +87,8 @@ def _load_hf_pg19_dataset(datasets_mod, dataset_id: str, *, streaming: bool):
 
     raise RuntimeError(
         "Failed to load PG-19 after script-compatibility fallbacks "
-        f"(dataset_id={dataset_id!r}, fallback_revision={PARQUET_FALLBACK_REVISION!r}). "
+        f"(dataset_id={dataset_id!r}, fallback_revision={PARQUET_FALLBACK_REVISION!r}, "
+        f"mirrors={list(PG19_MIRROR_DATASET_IDS)!r}). "
         "Please ensure you are on latest main and have a recent 'datasets' package."
     ) from last_script_exc
 

@@ -158,8 +158,8 @@ def test_load_pg19_uses_default_dataset_id_after_multiple_script_failures(
     assert fake_module.calls == [
         ("custom/pg19", True, None),
         ("custom/pg19", True, pg19.PARQUET_FALLBACK_REVISION),
-        ("deepmind/pg19", True, pg19.PARQUET_FALLBACK_REVISION),
         ("deepmind/pg19", True, None),
+        ("deepmind/pg19", True, pg19.PARQUET_FALLBACK_REVISION),
     ]
 
 
