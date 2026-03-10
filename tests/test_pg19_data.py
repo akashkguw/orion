@@ -10,7 +10,7 @@ class _FakeDatasetsModule:
     def __init__(self, payload):
         self.payload = payload
         self.calls: list[tuple[str, bool, str | None]] = []
-        self.fail_once_with_script_error = False
+        self.script_failures_remaining = 0
 
     def load_dataset(
         self,
@@ -19,8 +19,8 @@ class _FakeDatasetsModule:
         revision: str | None = None,
     ):
         self.calls.append((dataset_id, streaming, revision))
-        if self.fail_once_with_script_error:
-            self.fail_once_with_script_error = False
+        if self.script_failures_remaining > 0:
+            self.script_failures_remaining -= 1
             raise RuntimeError("Dataset scripts are no longer supported, but found pg19.py")
         return self.payload
 
@@ -116,7 +116,7 @@ def test_load_pg19_falls_back_to_parquet_revision(
             "validation": [{"text": "val sample one"}],
         }
     )
-    fake_module.fail_once_with_script_error = True
+    fake_module.script_failures_remaining = 1
     monkeypatch.setattr(pg19, "_import_hf_datasets", lambda: fake_module)
 
     train_ids, val_ids, _ = pg19.load_pg19(
@@ -131,6 +131,35 @@ def test_load_pg19_falls_back_to_parquet_revision(
     assert fake_module.calls == [
         ("deepmind/pg19", True, None),
         ("deepmind/pg19", True, pg19.PARQUET_FALLBACK_REVISION),
+    ]
+
+
+def test_load_pg19_uses_default_dataset_id_after_multiple_script_failures(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    fake_module = _FakeDatasetsModule(
+        {
+            "train": [{"text": "train sample one"}],
+            "validation": [{"text": "val sample one"}],
+        }
+    )
+    fake_module.script_failures_remaining = 3
+    monkeypatch.setattr(pg19, "_import_hf_datasets", lambda: fake_module)
+
+    train_ids, val_ids, _ = pg19.load_pg19(
+        tmp_path,
+        dataset_id="custom/pg19",
+        streaming=True,
+        force_rebuild=True,
+    )
+
+    assert train_ids.numel() > 0
+    assert val_ids.numel() > 0
+    assert fake_module.calls == [
+        ("custom/pg19", True, None),
+        ("custom/pg19", True, pg19.PARQUET_FALLBACK_REVISION),
+        ("deepmind/pg19", True, pg19.PARQUET_FALLBACK_REVISION),
+        ("deepmind/pg19", True, None),
     ]
 
 

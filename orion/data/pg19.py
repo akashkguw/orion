@@ -49,22 +49,43 @@ def _normalize_dataset_id(dataset_id: str) -> str:
     return value or DEFAULT_PG19_DATASET_ID
 
 
+def _is_script_compat_error(exc: BaseException) -> bool:
+    return "dataset scripts are no longer supported" in str(exc).lower()
+
+
 def _load_hf_pg19_dataset(datasets_mod, dataset_id: str, *, streaming: bool):
-    try:
-        return datasets_mod.load_dataset(dataset_id, streaming=streaming), None
-    except RuntimeError as exc:
-        message = str(exc)
-        if "Dataset scripts are no longer supported" not in message:
+    attempts = [
+        (dataset_id, None),
+        (dataset_id, PARQUET_FALLBACK_REVISION),
+        (DEFAULT_PG19_DATASET_ID, PARQUET_FALLBACK_REVISION),
+        (DEFAULT_PG19_DATASET_ID, None),
+    ]
+
+    seen: set[tuple[str, str | None]] = set()
+    last_script_exc: BaseException | None = None
+    for resolved_id, revision in attempts:
+        key = (resolved_id, revision)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        kwargs: dict[str, Any] = {"streaming": streaming}
+        if revision is not None:
+            kwargs["revision"] = revision
+
+        try:
+            return datasets_mod.load_dataset(resolved_id, **kwargs), revision
+        except Exception as exc:
+            if _is_script_compat_error(exc):
+                last_script_exc = exc
+                continue
             raise
-    # Newer datasets versions reject script-based loading; use parquet conversion branch.
-    return (
-        datasets_mod.load_dataset(
-            dataset_id,
-            streaming=streaming,
-            revision=PARQUET_FALLBACK_REVISION,
-        ),
-        PARQUET_FALLBACK_REVISION,
-    )
+
+    raise RuntimeError(
+        "Failed to load PG-19 after script-compatibility fallbacks "
+        f"(dataset_id={dataset_id!r}, fallback_revision={PARQUET_FALLBACK_REVISION!r}). "
+        "Please ensure you are on latest main and have a recent 'datasets' package."
+    ) from last_script_exc
 
 
 def _import_hf_datasets():
