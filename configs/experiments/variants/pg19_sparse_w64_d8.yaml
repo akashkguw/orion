@@ -1,0 +1,36 @@
+run:
+  out_dir: runs/exp_pg19_sparse_w64_d8
+  seed: 123
+  steps: 100
+  log_every: 10
+  save_every: 100
+
+data:
+  dataset: pg19
+  root: data
+  seq_len: 2048
+  batch_size: 8
+  pg19_dataset_id: deepmind/pg19
+  pg19_streaming: true
+  pg19_train_docs: 8000
+  pg19_val_docs: 1000
+
+model:
+  name: orion
+  d_model: 256
+  n_layers: 4
+  n_heads: 4
+  mlp_mult: 4
+
+attention:
+  backend: sparse
+  window_size: 64
+  expander_degree: 8
+  sparse_impl: flex
+  sparse_block_size: 128
+  sparse_probe_every: 0
+  sparse_probe_tokens: 256
+
+optim:
+  lr: 3e-4
+

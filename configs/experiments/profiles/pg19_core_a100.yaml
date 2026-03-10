@@ -1,0 +1,57 @@
+strict_apples_to_apples: true
+train_tokens_target: 6000000
+
+runner:
+  run_val_eval: true
+  val_eval_batches: 32
+  run_model_only_bench: true
+  bench_warmup: 5
+  bench_iters: 20
+  eval_long_context_batch_size: 1
+  disable_probe_metrics_for_apples_to_apples: true
+  auto_retry_oom: false
+  auto_retry_dense_cuda_fail: false
+  overwrite: false
+  log_every: 10
+  save_every: final
+
+analysis:
+  val_ppl_tolerance: 0.20
+
+seeds:
+  - 123
+  - 456
+  - 789
+
+seq_lens:
+  - 2048
+  - 4096
+  - 8192
+
+lr_grid:
+  - 0.0003
+
+fixed_batch_by_seq:
+  2048: 8
+  4096: 4
+  8192: 1
+
+batch_candidates_by_seq:
+  2048: [8, 6, 4, 2, 1]
+  4096: [4, 3, 2, 1]
+  8192: [1]
+
+variants:
+  - id: pg19_dense
+    config: configs/experiments/variants/pg19_dense.yaml
+    backend: dense
+    sparse_tag: dense
+  - id: pg19_window_w64
+    config: configs/experiments/variants/pg19_window_w64.yaml
+    backend: window
+    sparse_tag: w64
+  - id: pg19_sparse_w64_d8
+    config: configs/experiments/variants/pg19_sparse_w64_d8.yaml
+    backend: sparse
+    sparse_tag: w64_d8
+
