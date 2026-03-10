@@ -201,6 +201,7 @@ The experiment workflow is config-driven, with execution handled by `orion.exper
 - `full`: longer-context sweep
 - `pilot_norm`: sparse+norm vs window vs dense
 - `w64_d_sweep`: fixed `w=64` and increasing sparse degree (`d=8,16,32,64,128,256`)
+- `pg19_core_a100`: PG-19 long-context profile (`T=2048,4096,8192`) for dense/window/sparse
 
 ### Run in notebook
 
@@ -217,6 +218,17 @@ The notebook is intentionally thin:
 - runs paired analysis/plots
 
 All sweep knobs live in profile YAML (`runner.*`, `analysis.*`, `variants[]`).
+
+### PG-19 notebook
+
+Use [`experiment_p19.ipynb`](./experiment_p19.ipynb) for the final PG-19 validation run.
+
+PG-19 downloads at runtime and is cached under `data/pg19/cache_*` (not stored in git).
+Install the optional dependency when needed:
+
+```bash
+pip install datasets
+```
 
 ### Run from CLI (no notebook)
 
