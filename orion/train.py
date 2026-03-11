@@ -56,6 +56,22 @@ def _format_metric_or_na(value: object, *, fmt: str, suffix: str = "") -> str:
     return f"{numeric:{fmt}}{suffix}"
 
 
+def _as_bool(raw: object, *, default: bool) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int):
+        return bool(raw)
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return default
+
+
 def train(
     cfg: OrionConfig,
     *,
@@ -106,6 +122,36 @@ def train(
         from orion.data.shakespeare import load_tiny_shakespeare, sample_batch
 
         train_ids, val_ids, tok = load_tiny_shakespeare(data_root)
+        vocab_size = tok.vocab_size
+
+        def get_batch(split: str):
+            ids = train_ids if split == "train" else val_ids
+            return sample_batch(ids, batch_size=batch_size, seq_len=seq_len, device=device)
+
+    elif dataset in {"pg19", "p19"}:
+        from orion.data.pg19 import load_pg19
+        from orion.data.shakespeare import sample_batch
+
+        pg19_dataset_id = str(cfg.get("data", "pg19_dataset_id", default="deepmind/pg19"))
+        train_docs = cfg.get("data", "pg19_train_docs", default=None)
+        val_docs = cfg.get("data", "pg19_val_docs", default=None)
+        train_chars = cfg.get("data", "pg19_train_chars", default=None)
+        val_chars = cfg.get("data", "pg19_val_chars", default=None)
+        streaming = _as_bool(cfg.get("data", "pg19_streaming", default=True), default=True)
+        force_rebuild = _as_bool(
+            cfg.get("data", "pg19_force_rebuild", default=False), default=False
+        )
+
+        train_ids, val_ids, tok = load_pg19(
+            data_root,
+            dataset_id=pg19_dataset_id,
+            train_docs=int(train_docs) if train_docs is not None else None,
+            val_docs=int(val_docs) if val_docs is not None else None,
+            train_chars=int(train_chars) if train_chars is not None else None,
+            val_chars=int(val_chars) if val_chars is not None else None,
+            streaming=streaming,
+            force_rebuild=force_rebuild,
+        )
         vocab_size = tok.vocab_size
 
         def get_batch(split: str):

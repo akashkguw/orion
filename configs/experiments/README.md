@@ -35,3 +35,4 @@ No backend-specific trial construction is hardcoded in the notebook.
 - `full`: long-context sweep
 - `pilot_norm`: sparse stability sweep (`qk_norm`, `ortho_init`, `spectral_norm`) vs window vs dense
 - `w64_d_sweep`: fixed `window_size=64`, sparse degree sweep (`d=8..256`) vs window+dense
+- `pg19_core_a100`: PG-19 long-context validation profile for A100 (dense vs window vs sparse)

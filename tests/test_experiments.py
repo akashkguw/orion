@@ -46,3 +46,17 @@ def test_w64_d_sweep_profile_contains_sparse_degree_sweep_to_256():
 
     assert windows == {64}
     assert degrees == [8, 16, 32, 64, 128, 256]
+
+
+def test_pg19_core_a100_profile_builds_dense_window_sparse_trials():
+    ctx = load_profile_context("pg19_core_a100", repo_root=REPO_ROOT)
+    variants = load_variant_definitions(ctx)
+    specs = build_trial_specs(ctx, variants)
+
+    assert ctx.strict_apples_to_apples is True
+    assert ctx.seq_lens == [2048, 4096, 8192]
+    assert ctx.seeds == [123, 456, 789]
+
+    variant_ids = {variant.variant_id for variant in variants}
+    assert variant_ids == {"pg19_dense", "pg19_window_w64", "pg19_sparse_w64_d8"}
+    assert len(specs) == 27
