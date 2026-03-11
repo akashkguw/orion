@@ -107,9 +107,7 @@ def test_load_pg19_normalizes_short_dataset_id(tmp_path, monkeypatch: pytest.Mon
     assert fake_module.calls == [("deepmind/pg19", True, None)]
 
 
-def test_load_pg19_falls_back_to_parquet_revision(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-):
+def test_load_pg19_falls_back_to_parquet_revision(tmp_path, monkeypatch: pytest.MonkeyPatch):
     fake_module = _FakeDatasetsModule(
         {
             "train": [{"text": "train sample one"}],
