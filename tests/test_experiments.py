@@ -60,3 +60,24 @@ def test_pg19_core_a100_profile_builds_dense_window_sparse_trials():
     variant_ids = {variant.variant_id for variant in variants}
     assert variant_ids == {"pg19_dense", "pg19_window_w64", "pg19_sparse_w64_d8"}
     assert len(specs) == 27
+
+
+def test_sparse_formula_ablation_profile_builds_expected_variants():
+    ctx = load_profile_context("sparse_formula_ablation_t4", repo_root=REPO_ROOT)
+    variants = load_variant_definitions(ctx)
+    specs = build_trial_specs(ctx, variants)
+
+    assert ctx.strict_apples_to_apples is True
+    assert ctx.seq_lens == [1024, 2048, 4096]
+    assert ctx.seeds == [123, 456]
+
+    variant_ids = {variant.variant_id for variant in variants}
+    assert variant_ids == {
+        "dense",
+        "window_w64",
+        "sparse_w64_d64_formula_default",
+        "sparse_w64_d64_formula_lowcross",
+        "sparse_w64_d64_formula_highmix",
+        "sparse_w64_d64_formula_s2x2",
+    }
+    assert len(specs) == 36

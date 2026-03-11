@@ -23,6 +23,11 @@ def build_sparse_indices(
     expander_degree: int,
     head_idx: int,
     device: torch.device | str,
+    *,
+    expander_head_linear_coeff: int = 7,
+    expander_head_quadratic_coeff: int = 13,
+    expander_s2_coeff: int = 1,
+    expander_sh_coeff: int = 3,
 ) -> torch.Tensor:
     """Build sparse attention indices combining local window + expander edges.
 
@@ -36,6 +41,10 @@ def build_sparse_indices(
         expander_degree: Number of long-range expander neighbors (must be >= 0)
         head_idx: Head index for per-head variation (deterministic seed)
         device: Device to place indices on
+        expander_head_linear_coeff: Linear coefficient for head offset term
+        expander_head_quadratic_coeff: Quadratic coefficient for head offset term
+        expander_s2_coeff: Coefficient for squared hop term (s^2)
+        expander_sh_coeff: Coefficient for cross term (s * head_idx)
 
     Returns:
         indices: [n, window_size + expander_degree] tensor with attention indices
@@ -67,9 +76,14 @@ def build_sparse_indices(
         #    - deterministic head-specific variation
         if expander_degree > 0 and q > 0:
             m = q  # number of strictly-past positions available
-            head_offset = ((head_idx * 7) + (head_idx * head_idx * 13)) % m
+            head_offset = (
+                (head_idx * expander_head_linear_coeff)
+                + (head_idx * head_idx * expander_head_quadratic_coeff)
+            ) % m
             for s in range(1, expander_degree + 1):
-                offset = ((s * s) + head_offset + (3 * s * head_idx)) % m
+                offset = (
+                    (expander_s2_coeff * s * s) + head_offset + (expander_sh_coeff * s * head_idx)
+                ) % m
                 offset += 1  # force offset in [1, q]
                 k = q - offset  # now guaranteed in [0, q-1]
                 if k not in neighbors_set:
@@ -120,6 +134,12 @@ class SparseAttention:
         self.cfg = cfg
         self.window_size = max(1, cfg.window_size or 64)  # Ensure window_size >= 1
         self.expander_degree = cfg.expander_degree or 8
+        self.expander_head_linear_coeff = int(getattr(cfg, "expander_head_linear_coeff", 7) or 7)
+        self.expander_head_quadratic_coeff = int(
+            getattr(cfg, "expander_head_quadratic_coeff", 13) or 13
+        )
+        self.expander_s2_coeff = int(getattr(cfg, "expander_s2_coeff", 1) or 1)
+        self.expander_sh_coeff = int(getattr(cfg, "expander_sh_coeff", 3) or 3)
         self.sparse_impl = (cfg.sparse_impl or "flex").lower()
         self.sparse_block_size = max(16, int(cfg.sparse_block_size or 128))
         self.sparse_probe_every = max(0, int(getattr(cfg, "sparse_probe_every", 0) or 0))
@@ -165,16 +185,44 @@ class SparseAttention:
             extra entries if device is passed as different string representations
             (e.g., "cuda" vs "cuda:0"). In practice, q.device is consistent.
         """
-        cache_key = (n, h, self.window_size, self.expander_degree, str(device))
+        cache_key = (
+            n,
+            h,
+            self.window_size,
+            self.expander_degree,
+            self.expander_head_linear_coeff,
+            self.expander_head_quadratic_coeff,
+            self.expander_s2_coeff,
+            self.expander_sh_coeff,
+            str(device),
+        )
         if cache_key not in self.indices_cache:
             self.indices_cache[cache_key] = build_sparse_indices(
-                n, self.window_size, self.expander_degree, h, device
+                n,
+                self.window_size,
+                self.expander_degree,
+                h,
+                device,
+                expander_head_linear_coeff=self.expander_head_linear_coeff,
+                expander_head_quadratic_coeff=self.expander_head_quadratic_coeff,
+                expander_s2_coeff=self.expander_s2_coeff,
+                expander_sh_coeff=self.expander_sh_coeff,
             )
         return self.indices_cache[cache_key]
 
     def _get_indices_per_head(self, *, T: int, H: int, device: torch.device) -> torch.Tensor:
         """Get stacked sparse indices [H, T, degree], cached by shape/head/device."""
-        cache_key = (T, H, self.window_size, self.expander_degree, str(device))
+        cache_key = (
+            T,
+            H,
+            self.window_size,
+            self.expander_degree,
+            self.expander_head_linear_coeff,
+            self.expander_head_quadratic_coeff,
+            self.expander_s2_coeff,
+            self.expander_sh_coeff,
+            str(device),
+        )
         if cache_key not in self.indices_per_head_cache:
             self.indices_per_head_cache[cache_key] = torch.stack(
                 [self._get_indices(T, h, device) for h in range(H)], dim=0
@@ -261,6 +309,10 @@ class SparseAttention:
             T,
             self.window_size,
             self.expander_degree,
+            self.expander_head_linear_coeff,
+            self.expander_head_quadratic_coeff,
+            self.expander_s2_coeff,
+            self.expander_sh_coeff,
             self.sparse_block_size,
             str(device),
         )

@@ -92,8 +92,10 @@ For sequence length `T`, window size `W`, expander degree `d`, and head `h`, ORI
 1. Window neighbors:
    - `N_window(q) = {k | max(0, q-W+1) <= k <= q}`
 2. Expander candidates (deterministic, causal):
-   - generate `d` head-specific offsets
-   - convert each offset to `k = q - offset`
+   - for hop `s in {1..d}`, compute:
+     - `head_offset = ((h*a) + (h^2*b)) mod q`
+     - `offset = ((c*s^2) + head_offset + (d_coef*s*h)) mod q + 1`
+   - convert offset to key index `k = q - offset`
    - keep only valid causal keys (`0 <= k <= q`)
    - drop duplicates and keys already in `N_window(q)`
 3. Final sparse neighborhood:
@@ -101,6 +103,12 @@ For sequence length `T`, window size `W`, expander degree `d`, and head `h`, ORI
    - cardinality is at most `W + d` (and smaller near sequence start)
 
 This index set is used directly to build sparse block connectivity for fused `flex_attention` execution.
+
+Expander formula coefficients are config-tunable under `attention.*`:
+- `expander_head_linear_coeff` (`a`, default `7`)
+- `expander_head_quadratic_coeff` (`b`, default `13`)
+- `expander_s2_coeff` (`c`, default `1`)
+- `expander_sh_coeff` (`d_coef`, default `3`)
 
 #### Causal guarantees
 
