@@ -192,6 +192,8 @@ def train(
                 "This can collapse sparse behavior to near-dense."
             )
 
+    max_seq_len = int(cfg.get("model", "max_seq_len", default=max(seq_len, 4096)))
+
     model = build_model(
         name=model_name,
         vocab_size=vocab_size,
@@ -202,6 +204,7 @@ def train(
         device=device,
         attention_cfg=attention_cfg,
         stability_cfg=stability_cfg,
+        max_seq_len=max_seq_len,
     )
 
     opt = AdamW(model.parameters(), lr=float(cfg.get("optim", "lr", default=3e-4)))

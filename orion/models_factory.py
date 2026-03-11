@@ -102,6 +102,7 @@ def build_model(
     device: torch.device,
     attention_cfg: AttentionConfig | None = None,
     stability_cfg=None,
+    max_seq_len: int = 4096,
 ) -> nn.Module:
     """Build a model by name. attention_cfg only affects the 'orion' path."""
     name = (name or "tiny").lower()
@@ -119,6 +120,7 @@ def build_model(
             n_heads=n_heads,
             mlp_mult=mlp_mult,
             attention_cfg=attention_cfg,
+            max_seq_len=max_seq_len,
             stability_cfg=stability_cfg,
         ).to(device)
 

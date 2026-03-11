@@ -61,6 +61,7 @@ def _build_and_load_model_for_eval(
     n_heads = int(model_cfg.get("model", "n_heads", default=4))
     mlp_mult = int(model_cfg.get("model", "mlp_mult", default=4))
     model_name = str(model_cfg.get("model", "name", default="tiny"))
+    max_seq_len = int(model_cfg.get("model", "max_seq_len", default=4096))
     attention_cfg = model_cfg.attention_config()
     raw_stability_cfg = model_cfg.stability_config()
     effective_stability_cfg = effective_stability_for_backend(
@@ -77,6 +78,7 @@ def _build_and_load_model_for_eval(
         device=device,
         attention_cfg=attention_cfg,
         stability_cfg=effective_stability_cfg,
+        max_seq_len=max_seq_len,
     )
 
     try:
@@ -96,6 +98,7 @@ def _build_and_load_model_for_eval(
                 device=device,
                 attention_cfg=attention_cfg,
                 stability_cfg=raw_stability_cfg,
+                max_seq_len=max_seq_len,
             )
             model.load_state_dict(ckpt["model"], strict=True)
         else:
