@@ -71,3 +71,15 @@ variants:
   config: configs/experiments/variants/sparse_w64_d64_qknorm.yaml
   backend: sparse
   sparse_tag: w64_d64_qknorm
+- id: sparse_w64_d8
+  config: configs/experiments/variants/sparse_w64_d8.yaml
+  backend: sparse
+  sparse_tag: w64_d8
+- id: sparse_w64_d16
+  config: configs/experiments/variants/sparse_w64_d16.yaml
+  backend: sparse
+  sparse_tag: w64_d16
+- id: window_w8
+  config: configs/experiments/variants/window_w8.yaml
+  backend: window
+  sparse_tag: w8

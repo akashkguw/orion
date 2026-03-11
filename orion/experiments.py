@@ -19,6 +19,7 @@ import torch
 import yaml
 
 from .attention.base import AttentionConfig
+from .data.pg19 import load_pg19
 from .data.shakespeare import load_tiny_shakespeare
 from .model import loss_fn
 from .models_factory import build_model
@@ -150,6 +151,43 @@ def _cfg_int_list_map(raw: dict[str, Any]) -> dict[int, list[int]]:
     for key, value in raw.items():
         out[int(key)] = [int(item) for item in list(value)]
     return out
+
+
+def _cfg_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    return int(value)
+
+
+def _load_dataset_for_eval(cfg: dict[str, Any]):
+    data_cfg = cfg.get("data", {}) or {}
+    if not isinstance(data_cfg, dict):
+        raise ValueError(f"data config must be a mapping, got {type(data_cfg).__name__}")
+
+    dataset = str(data_cfg.get("dataset", "tinyshakespeare")).lower()
+    data_root = str(data_cfg.get("root", "data"))
+
+    if dataset in {"tinyshakespeare", "shakespeare"}:
+        return load_tiny_shakespeare(data_root)
+
+    if dataset in {"pg19", "p19"}:
+        return load_pg19(
+            data_root,
+            dataset_id=str(data_cfg.get("pg19_dataset_id", "deepmind/pg19")),
+            train_docs=_cfg_optional_int(data_cfg.get("pg19_train_docs")),
+            val_docs=_cfg_optional_int(data_cfg.get("pg19_val_docs")),
+            train_chars=_cfg_optional_int(data_cfg.get("pg19_train_chars")),
+            val_chars=_cfg_optional_int(data_cfg.get("pg19_val_chars")),
+            streaming=_cfg_bool(data_cfg.get("pg19_streaming"), True),
+            force_rebuild=_cfg_bool(data_cfg.get("pg19_force_rebuild"), False),
+        )
+
+    raise ValueError(
+        f"Unsupported dataset for experiment evaluation: {dataset!r}. "
+        "Use tinyshakespeare/shakespeare or pg19."
+    )
 
 
 def load_profile_context(
@@ -447,9 +485,13 @@ def load_model_from_cfg_and_ckpt(
     cfg: dict[str, Any],
     ckpt_path: Path,
     device: torch.device,
+    *,
+    vocab_size: int | None = None,
 ):
-    _, _, tok = load_tiny_shakespeare(cfg["data"].get("root", "data"))
-    vocab_size = tok.vocab_size
+    resolved_vocab_size = vocab_size
+    if resolved_vocab_size is None:
+        _, _, tok = _load_dataset_for_eval(cfg)
+        resolved_vocab_size = tok.vocab_size
 
     att_cfg = cfg.get("attention", {})
     attention_cfg = AttentionConfig(
@@ -479,7 +521,7 @@ def load_model_from_cfg_and_ckpt(
 
     model = build_model(
         name=cfg["model"]["name"],
-        vocab_size=vocab_size,
+        vocab_size=int(resolved_vocab_size),
         d_model=int(cfg["model"]["d_model"]),
         n_layers=int(cfg["model"]["n_layers"]),
         n_heads=int(cfg["model"]["n_heads"]),
@@ -499,7 +541,7 @@ def load_model_from_cfg_and_ckpt(
         ):
             model = build_model(
                 name=cfg["model"]["name"],
-                vocab_size=vocab_size,
+                vocab_size=int(resolved_vocab_size),
                 d_model=int(cfg["model"]["d_model"]),
                 n_layers=int(cfg["model"]["n_layers"]),
                 n_heads=int(cfg["model"]["n_heads"]),
@@ -512,16 +554,15 @@ def load_model_from_cfg_and_ckpt(
         else:
             raise
     model.eval()
-    return model, tok
+    return model
 
 
 def evaluate_val_ppl(
     cfg: dict[str, Any], ckpt_path: Path, *, batches: int = 40
 ) -> tuple[float, float]:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, _ = load_model_from_cfg_and_ckpt(cfg, ckpt_path, device)
-
-    _, val_ids, _ = load_tiny_shakespeare(cfg["data"].get("root", "data"))
+    _, val_ids, tok = _load_dataset_for_eval(cfg)
+    model = load_model_from_cfg_and_ckpt(cfg, ckpt_path, device, vocab_size=tok.vocab_size)
     batch_size = int(cfg["data"]["batch_size"])
     seq_len = int(cfg["data"]["seq_len"])
 
@@ -555,7 +596,8 @@ def benchmark_model_only_forward(
     iters: int = 20,
 ) -> float:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, tok = load_model_from_cfg_and_ckpt(cfg, ckpt_path, device)
+    _, _, tok = _load_dataset_for_eval(cfg)
+    model = load_model_from_cfg_and_ckpt(cfg, ckpt_path, device, vocab_size=tok.vocab_size)
 
     batch_size = int(cfg["data"]["batch_size"])
     seq_len = int(cfg["data"]["seq_len"])
