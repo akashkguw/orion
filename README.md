@@ -209,6 +209,8 @@ The experiment workflow is config-driven, with execution handled by `orion.exper
 - `full`: longer-context sweep
 - `pilot_norm`: sparse+norm vs window vs dense
 - `w64_d_sweep`: fixed `w=64` and increasing sparse degree (`d=8,16,32,64,128,256`)
+- `sparse_formula_ablation_t4`: coefficient sweep at fixed `w=64,d=64`
+- `sparse_formula_ablation_d8_t4`: coefficient sweep at fixed `w=64,d=8`
 - `pg19_core_a100`: PG-19 long-context profile (`T=2048,4096,8192`) for dense/window/sparse
 
 ### Run in notebook
@@ -216,7 +218,7 @@ The experiment workflow is config-driven, with execution handled by `orion.exper
 Open [`experiment.ipynb`](./experiment.ipynb), then set:
 
 ```python
-PROFILE = "pilot9"  # or pilot, full, pilot_norm, w64_d_sweep
+PROFILE = "pilot9"  # or pilot, full, pilot_norm, w64_d_sweep, sparse_formula_ablation_d8_t4
 ```
 
 The notebook is intentionally thin:

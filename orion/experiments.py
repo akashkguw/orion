@@ -95,6 +95,33 @@ class RunResult:
     trial_count: int
 
 
+class MetricsPlotResult(list):
+    """Backward-compatible result container for plot_all_numeric_metrics.
+
+    Behaves like a plain list of metric names while also supporting legacy
+    dict-style lookups used by some notebooks:
+      - result["metrics"] -> list[str]
+      - result["count"] -> int
+    """
+
+    @property
+    def metrics(self) -> list[str]:
+        return list(self)
+
+    @property
+    def count(self) -> int:
+        return len(self)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            if key == "metrics":
+                return self.metrics
+            if key == "count":
+                return self.count
+            raise KeyError(f"Unknown key: {key!r}")
+        return super().__getitem__(key)
+
+
 def get_git_commit() -> str:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
@@ -1308,7 +1335,7 @@ def plot_all_numeric_metrics(
     out_dir: str | Path,
     show_inline: bool = True,
     max_inline: int | None = None,
-):
+) -> MetricsPlotResult:
     import matplotlib.pyplot as plt
     import pandas as pd
     import seaborn as sns
@@ -1395,7 +1422,7 @@ def plot_all_numeric_metrics(
             plt.close()
 
     print(f"Rendered and saved {rendered} metric plots to: {plots_dir}")
-    return metric_cols
+    return MetricsPlotResult(metric_cols)
 
 
 def main() -> None:

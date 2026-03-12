@@ -81,3 +81,27 @@ def test_sparse_formula_ablation_profile_builds_expected_variants():
         "sparse_w64_d64_formula_s2x2",
     }
     assert len(specs) == 36
+
+
+def test_sparse_formula_ablation_d8_profile_builds_expected_variants():
+    ctx = load_profile_context("sparse_formula_ablation_d8_t4", repo_root=REPO_ROOT)
+    variants = load_variant_definitions(ctx)
+    specs = build_trial_specs(ctx, variants)
+
+    assert ctx.strict_apples_to_apples is True
+    assert ctx.seq_lens == [1024, 2048, 4096]
+    assert ctx.seeds == [123, 456]
+
+    variant_ids = {variant.variant_id for variant in variants}
+    assert variant_ids == {
+        "dense",
+        "window_w64",
+        "sparse_w64_d8_formula_default",
+        "sparse_w64_d8_formula_lowcross",
+        "sparse_w64_d8_formula_highmix",
+        "sparse_w64_d8_formula_s2x2",
+    }
+
+    sparse_variants = [variant for variant in variants if variant.backend == "sparse"]
+    assert {variant.expander_degree for variant in sparse_variants} == {8}
+    assert len(specs) == 36
