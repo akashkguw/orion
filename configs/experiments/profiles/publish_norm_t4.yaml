@@ -63,35 +63,35 @@ variants:
   config: configs/experiments/variants/window_w64.yaml
   backend: window
   sparse_tag: w64
-- id: sparse_w64_d64
-  config: configs/experiments/variants/sparse_w64_d64.yaml
+- id: sparse_w64_d8
+  config: configs/experiments/variants/sparse_w64_d8.yaml
   backend: sparse
-  sparse_tag: w64_d64_none
-- id: sparse_w64_d64_qknorm
-  config: configs/experiments/variants/sparse_w64_d64_qknorm.yaml
+  sparse_tag: w64_d8_none
+- id: sparse_w64_d8_qknorm
+  config: configs/experiments/variants/sparse_w64_d8_qknorm.yaml
   backend: sparse
-  sparse_tag: w64_d64_qk
-- id: sparse_w64_d64_ortho
-  config: configs/experiments/variants/sparse_w64_d64_ortho.yaml
+  sparse_tag: w64_d8_qk
+- id: sparse_w64_d8_ortho
+  config: configs/experiments/variants/sparse_w64_d8_ortho.yaml
   backend: sparse
-  sparse_tag: w64_d64_ortho
-- id: sparse_w64_d64_spectral
-  config: configs/experiments/variants/sparse_w64_d64_spectral.yaml
+  sparse_tag: w64_d8_ortho
+- id: sparse_w64_d8_spectral
+  config: configs/experiments/variants/sparse_w64_d8_spectral.yaml
   backend: sparse
-  sparse_tag: w64_d64_spectral
-- id: sparse_w64_d64_qk_ortho
-  config: configs/experiments/variants/sparse_w64_d64_qk_ortho.yaml
+  sparse_tag: w64_d8_spectral
+- id: sparse_w64_d8_qk_ortho
+  config: configs/experiments/variants/sparse_w64_d8_qk_ortho.yaml
   backend: sparse
-  sparse_tag: w64_d64_qk_ortho
-- id: sparse_w64_d64_qk_spectral
-  config: configs/experiments/variants/sparse_w64_d64_qk_spectral.yaml
+  sparse_tag: w64_d8_qk_ortho
+- id: sparse_w64_d8_qk_spectral
+  config: configs/experiments/variants/sparse_w64_d8_qk_spectral.yaml
   backend: sparse
-  sparse_tag: w64_d64_qk_spectral
-- id: sparse_w64_d64_ortho_spectral
-  config: configs/experiments/variants/sparse_w64_d64_ortho_spectral.yaml
+  sparse_tag: w64_d8_qk_spectral
+- id: sparse_w64_d8_ortho_spectral
+  config: configs/experiments/variants/sparse_w64_d8_ortho_spectral.yaml
   backend: sparse
-  sparse_tag: w64_d64_ortho_spectral
-- id: sparse_w64_d64_qk_ortho_spectral
-  config: configs/experiments/variants/sparse_w64_d64_qk_ortho_spectral.yaml
+  sparse_tag: w64_d8_ortho_spectral
+- id: sparse_w64_d8_qk_ortho_spectral
+  config: configs/experiments/variants/sparse_w64_d8_qk_ortho_spectral.yaml
   backend: sparse
-  sparse_tag: w64_d64_qk_ortho_spectral
+  sparse_tag: w64_d8_qk_ortho_spectral
