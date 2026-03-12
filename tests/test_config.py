@@ -83,6 +83,10 @@ def test_attention_config_defaults():
     assert acfg.sparse_block_size == 128
     assert acfg.sparse_probe_every == 0
     assert acfg.sparse_probe_tokens == 256
+    assert acfg.expander_head_linear_coeff == 7
+    assert acfg.expander_head_quadratic_coeff == 13
+    assert acfg.expander_s2_coeff == 1
+    assert acfg.expander_sh_coeff == 3
 
 
 def test_attention_config_from_yaml():
@@ -141,6 +145,10 @@ def test_attention_config_sparse_impl_and_block_size():
                 "sparse_block_size": 64,
                 "sparse_probe_every": 25,
                 "sparse_probe_tokens": 192,
+                "expander_head_linear_coeff": 5,
+                "expander_head_quadratic_coeff": 11,
+                "expander_s2_coeff": 2,
+                "expander_sh_coeff": 7,
             },
         }
     )
@@ -149,3 +157,30 @@ def test_attention_config_sparse_impl_and_block_size():
     assert acfg.sparse_block_size == 64
     assert acfg.sparse_probe_every == 25
     assert acfg.sparse_probe_tokens == 192
+    assert acfg.expander_head_linear_coeff == 5
+    assert acfg.expander_head_quadratic_coeff == 11
+    assert acfg.expander_s2_coeff == 2
+    assert acfg.expander_sh_coeff == 7
+
+
+def test_attention_config_expander_coefficients_from_legacy_model_keys():
+    """Legacy model.* expander formula keys are still supported."""
+    cfg = OrionConfig(
+        {
+            "run": {"out_dir": "/tmp"},
+            "model": {
+                "attention_type": "sparse",
+                "window_size": 64,
+                "expander_degree": 8,
+                "expander_head_linear_coeff": "9",
+                "expander_head_quadratic_coeff": "17",
+                "expander_s2_coeff": "3",
+                "expander_sh_coeff": "4",
+            },
+        }
+    )
+    acfg = cfg.attention_config()
+    assert acfg.expander_head_linear_coeff == 9
+    assert acfg.expander_head_quadratic_coeff == 17
+    assert acfg.expander_s2_coeff == 3
+    assert acfg.expander_sh_coeff == 4

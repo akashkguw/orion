@@ -92,8 +92,10 @@ For sequence length `T`, window size `W`, expander degree `d`, and head `h`, ORI
 1. Window neighbors:
    - `N_window(q) = {k | max(0, q-W+1) <= k <= q}`
 2. Expander candidates (deterministic, causal):
-   - generate `d` head-specific offsets
-   - convert each offset to `k = q - offset`
+   - for hop `s in {1..d}`, compute:
+     - `head_offset = ((h*a) + (h^2*b)) mod q`
+     - `offset = ((c*s^2) + head_offset + (d_coef*s*h)) mod q + 1`
+   - convert offset to key index `k = q - offset`
    - keep only valid causal keys (`0 <= k <= q`)
    - drop duplicates and keys already in `N_window(q)`
 3. Final sparse neighborhood:
@@ -101,6 +103,12 @@ For sequence length `T`, window size `W`, expander degree `d`, and head `h`, ORI
    - cardinality is at most `W + d` (and smaller near sequence start)
 
 This index set is used directly to build sparse block connectivity for fused `flex_attention` execution.
+
+Expander formula coefficients are config-tunable under `attention.*`:
+- `expander_head_linear_coeff` (`a`, default `7`)
+- `expander_head_quadratic_coeff` (`b`, default `13`)
+- `expander_s2_coeff` (`c`, default `1`)
+- `expander_sh_coeff` (`d_coef`, default `3`)
 
 #### Causal guarantees
 
@@ -201,6 +209,8 @@ The experiment workflow is config-driven, with execution handled by `orion.exper
 - `full`: longer-context sweep
 - `pilot_norm`: sparse+norm vs window vs dense
 - `w64_d_sweep`: fixed `w=64` and increasing sparse degree (`d=8,16,32,64,128,256`)
+- `sparse_formula_ablation_t4`: coefficient sweep at fixed `w=64,d=64`
+- `sparse_formula_ablation_d8_t4`: coefficient sweep at fixed `w=64,d=8`
 - `pg19_core_a100`: PG-19 long-context profile (`T=2048,4096,8192`) for dense/window/sparse
 
 ### Run in notebook
@@ -208,7 +218,7 @@ The experiment workflow is config-driven, with execution handled by `orion.exper
 Open [`experiment.ipynb`](./experiment.ipynb), then set:
 
 ```python
-PROFILE = "pilot9"  # or pilot, full, pilot_norm, w64_d_sweep
+PROFILE = "pilot9"  # or pilot, full, pilot_norm, w64_d_sweep, sparse_formula_ablation_d8_t4
 ```
 
 The notebook is intentionally thin:

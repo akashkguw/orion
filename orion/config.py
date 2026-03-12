@@ -54,10 +54,14 @@ class OrionConfig:
         Preferred schema:
             attention.backend / attention.window_size / attention.expander_degree
             attention.sparse_impl / attention.sparse_block_size
+            attention.expander_head_linear_coeff / attention.expander_head_quadratic_coeff
+            attention.expander_s2_coeff / attention.expander_sh_coeff
 
         Backward-compatible fallback:
             model.attention_type / model.window_size / model.expander_degree
             model.sparse_impl / model.sparse_block_size
+            model.expander_head_linear_coeff / model.expander_head_quadratic_coeff
+            model.expander_s2_coeff / model.expander_sh_coeff
         """
         attention_section = self.get("attention", default={})
         model_section = self.get("model", default={})
@@ -104,6 +108,30 @@ class OrionConfig:
         if sparse_probe_tokens is None:
             sparse_probe_tokens = 256
 
+        expander_head_linear_coeff = attention_section.get("expander_head_linear_coeff")
+        if expander_head_linear_coeff is None:
+            expander_head_linear_coeff = model_section.get("expander_head_linear_coeff")
+        if expander_head_linear_coeff is None:
+            expander_head_linear_coeff = 7
+
+        expander_head_quadratic_coeff = attention_section.get("expander_head_quadratic_coeff")
+        if expander_head_quadratic_coeff is None:
+            expander_head_quadratic_coeff = model_section.get("expander_head_quadratic_coeff")
+        if expander_head_quadratic_coeff is None:
+            expander_head_quadratic_coeff = 13
+
+        expander_s2_coeff = attention_section.get("expander_s2_coeff")
+        if expander_s2_coeff is None:
+            expander_s2_coeff = model_section.get("expander_s2_coeff")
+        if expander_s2_coeff is None:
+            expander_s2_coeff = 1
+
+        expander_sh_coeff = attention_section.get("expander_sh_coeff")
+        if expander_sh_coeff is None:
+            expander_sh_coeff = model_section.get("expander_sh_coeff")
+        if expander_sh_coeff is None:
+            expander_sh_coeff = 3
+
         window_probe_every = attention_section.get("window_probe_every")
         if window_probe_every is None:
             window_probe_every = model_section.get("window_probe_every")
@@ -124,6 +152,10 @@ class OrionConfig:
             sparse_block_size=int(sparse_block_size),
             sparse_probe_every=int(sparse_probe_every),
             sparse_probe_tokens=int(sparse_probe_tokens),
+            expander_head_linear_coeff=int(expander_head_linear_coeff),
+            expander_head_quadratic_coeff=int(expander_head_quadratic_coeff),
+            expander_s2_coeff=int(expander_s2_coeff),
+            expander_sh_coeff=int(expander_sh_coeff),
             window_probe_every=int(window_probe_every),
             window_probe_tokens=int(window_probe_tokens),
         )

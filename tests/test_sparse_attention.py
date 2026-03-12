@@ -76,6 +76,39 @@ class TestBuildSparseIndices:
 
         assert torch.equal(indices1, indices2), "Same head_idx should produce identical patterns"
 
+    def test_custom_expander_coefficients_change_pattern(self):
+        """Changing formula coefficients should alter sparse neighborhoods."""
+        n, window_size, expander_degree = 64, 8, 8
+        default_indices = build_sparse_indices(
+            n, window_size, expander_degree, head_idx=2, device="cpu"
+        )
+        tuned_indices = build_sparse_indices(
+            n,
+            window_size,
+            expander_degree,
+            head_idx=2,
+            device="cpu",
+            expander_head_linear_coeff=5,
+            expander_head_quadratic_coeff=11,
+            expander_s2_coeff=2,
+            expander_sh_coeff=7,
+        )
+        assert (default_indices != tuned_indices).any(), (
+            "Expected tuned expander coefficients to change sparse neighbors"
+        )
+
+    def test_custom_expander_coefficients_stay_deterministic(self):
+        """Custom coefficient setting must remain deterministic."""
+        kwargs = {
+            "expander_head_linear_coeff": 9,
+            "expander_head_quadratic_coeff": 17,
+            "expander_s2_coeff": 3,
+            "expander_sh_coeff": 4,
+        }
+        indices1 = build_sparse_indices(64, 8, 8, head_idx=1, device="cpu", **kwargs)
+        indices2 = build_sparse_indices(64, 8, 8, head_idx=1, device="cpu", **kwargs)
+        assert torch.equal(indices1, indices2)
+
     def test_no_duplicate_valid_neighbors_per_query(self):
         """Valid neighbors should be unique per query after deduplication."""
         n, window_size, expander_degree = 64, 8, 16
@@ -206,6 +239,39 @@ class TestSparseAttention:
         assert attn.last_duplicate_neighbor_slots == 0
         assert attn.last_valid_neighbor_fraction_causal_cap > 0.0
         assert attn.last_valid_neighbor_fraction_vs_causal_cap > 0.99
+
+    def test_sparse_attention_passes_custom_expander_coeffs_to_builder(self, monkeypatch):
+        """SparseAttention should forward expander coefficients into index construction."""
+        cfg = AttentionConfig(
+            backend="sparse",
+            window_size=8,
+            expander_degree=4,
+            sparse_impl="auto",
+            expander_head_linear_coeff=5,
+            expander_head_quadratic_coeff=11,
+            expander_s2_coeff=2,
+            expander_sh_coeff=7,
+        )
+        attn = SparseAttention(cfg)
+        original = sparse_module.build_sparse_indices
+        seen: dict[str, int] = {}
+
+        def _spy_build_sparse_indices(*args, **kwargs):
+            seen["expander_head_linear_coeff"] = kwargs["expander_head_linear_coeff"]
+            seen["expander_head_quadratic_coeff"] = kwargs["expander_head_quadratic_coeff"]
+            seen["expander_s2_coeff"] = kwargs["expander_s2_coeff"]
+            seen["expander_sh_coeff"] = kwargs["expander_sh_coeff"]
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(sparse_module, "build_sparse_indices", _spy_build_sparse_indices)
+        _ = attn._get_indices(n=32, h=1, device="cpu")
+
+        assert seen == {
+            "expander_head_linear_coeff": 5,
+            "expander_head_quadratic_coeff": 11,
+            "expander_s2_coeff": 2,
+            "expander_sh_coeff": 7,
+        }
 
     def test_causal_cap_fraction_matches_theory_for_large_window(self):
         """Causal-cap expected valid fraction should match analytic value."""

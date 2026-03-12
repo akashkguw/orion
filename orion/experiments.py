@@ -95,6 +95,33 @@ class RunResult:
     trial_count: int
 
 
+class MetricsPlotResult(list):
+    """Backward-compatible result container for plot_all_numeric_metrics.
+
+    Behaves like a plain list of metric names while also supporting legacy
+    dict-style lookups used by some notebooks:
+      - result["metrics"] -> list[str]
+      - result["count"] -> int
+    """
+
+    @property
+    def metrics(self) -> list[str]:
+        return list(self)
+
+    @property
+    def count(self) -> int:
+        return len(self)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            if key == "metrics":
+                return self.metrics
+            if key == "count":
+                return self.count
+            raise KeyError(f"Unknown key: {key!r}")
+        return super().__getitem__(key)
+
+
 def get_git_commit() -> str:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
@@ -291,7 +318,16 @@ def _derive_sparse_tag(backend: str, attention_cfg: dict[str, Any], entry: dict[
     if backend == "sparse":
         window_size = int(attention_cfg.get("window_size", 64))
         expander_degree = int(attention_cfg.get("expander_degree", 8))
-        return f"w{window_size}_d{expander_degree}"
+        tag = f"w{window_size}_d{expander_degree}"
+        coeffs = {
+            "a": int(attention_cfg.get("expander_head_linear_coeff", 7)),
+            "b": int(attention_cfg.get("expander_head_quadratic_coeff", 13)),
+            "c": int(attention_cfg.get("expander_s2_coeff", 1)),
+            "d": int(attention_cfg.get("expander_sh_coeff", 3)),
+        }
+        if coeffs != {"a": 7, "b": 13, "c": 1, "d": 3}:
+            tag = f"{tag}_a{coeffs['a']}_b{coeffs['b']}_c{coeffs['c']}_d{coeffs['d']}"
+        return tag
     return backend
 
 
@@ -502,6 +538,10 @@ def load_model_from_cfg_and_ckpt(
         sparse_block_size=int(att_cfg.get("sparse_block_size", 128)),
         sparse_probe_every=int(att_cfg.get("sparse_probe_every", 0)),
         sparse_probe_tokens=int(att_cfg.get("sparse_probe_tokens", 256)),
+        expander_head_linear_coeff=int(att_cfg.get("expander_head_linear_coeff", 7)),
+        expander_head_quadratic_coeff=int(att_cfg.get("expander_head_quadratic_coeff", 13)),
+        expander_s2_coeff=int(att_cfg.get("expander_s2_coeff", 1)),
+        expander_sh_coeff=int(att_cfg.get("expander_sh_coeff", 3)),
         window_probe_every=int(att_cfg.get("window_probe_every", 50)),
         window_probe_tokens=int(att_cfg.get("window_probe_tokens", 256)),
     )
@@ -1295,7 +1335,7 @@ def plot_all_numeric_metrics(
     out_dir: str | Path,
     show_inline: bool = True,
     max_inline: int | None = None,
-):
+) -> MetricsPlotResult:
     import matplotlib.pyplot as plt
     import pandas as pd
     import seaborn as sns
@@ -1382,7 +1422,7 @@ def plot_all_numeric_metrics(
             plt.close()
 
     print(f"Rendered and saved {rendered} metric plots to: {plots_dir}")
-    return metric_cols
+    return MetricsPlotResult(metric_cols)
 
 
 def main() -> None:

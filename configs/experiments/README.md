@@ -12,7 +12,7 @@ This directory provides a config-first setup for `experiment.ipynb`.
 In `experiment.ipynb`, set:
 
 ```python
-PROFILE = "pilot9"  # or "pilot", "full", "pilot_norm", "w64_d_sweep"
+PROFILE = "pilot9"  # or "pilot", "full", "pilot_norm", "w64_d_sweep", "sparse_formula_ablation_d8_t4"
 ```
 
 The notebook now delegates execution to `orion.experiments` and loads:
@@ -35,4 +35,6 @@ No backend-specific trial construction is hardcoded in the notebook.
 - `full`: long-context sweep
 - `pilot_norm`: sparse stability sweep (`qk_norm`, `ortho_init`, `spectral_norm`) vs window vs dense
 - `w64_d_sweep`: fixed `window_size=64`, sparse degree sweep (`d=8..256`) vs window+dense
+- `sparse_formula_ablation_t4`: sparse expander formula-coefficient sweep (`a,b,c,d`) vs dense/window
+- `sparse_formula_ablation_d8_t4`: same formula-coefficient sweep but fixed `d=8`
 - `pg19_core_a100`: PG-19 long-context validation profile for A100 (dense vs window vs sparse)

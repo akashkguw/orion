@@ -1,5 +1,5 @@
 run:
-  out_dir: runs/exp_sparse_w64_d64_qk_ortho_spectral
+  out_dir: runs/exp_sparse_w64_d8_qk_spectral
   seed: 123
   steps: 100
   log_every: 10
@@ -21,7 +21,7 @@ model:
 attention:
   backend: sparse
   window_size: 64
-  expander_degree: 64
+  expander_degree: 8
   sparse_impl: flex
   sparse_block_size: 64
   sparse_probe_every: 50
@@ -29,8 +29,9 @@ attention:
 
 stability:
   qk_norm: true
-  ortho_init: true
+  ortho_init: false
   spectral_norm: true
 
 optim:
   lr: 3e-4
+

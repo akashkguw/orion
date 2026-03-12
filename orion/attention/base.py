@@ -22,6 +22,13 @@ class AttentionConfig:
     # every N forward calls, run a small gather probe to estimate entropy/mass.
     sparse_probe_every: int = 0
     sparse_probe_tokens: int = 256
+    # ORION expander formula coefficients:
+    # head_offset = ((h * a) + (h^2 * b)) mod q
+    # offset = ((c * s^2) + head_offset + (d * s * h)) mod q + 1
+    expander_head_linear_coeff: int = 7
+    expander_head_quadratic_coeff: int = 13
+    expander_s2_coeff: int = 1
+    expander_sh_coeff: int = 3
     # Optional probe metrics for window backend:
     # every N forward calls, run a bounded probe to estimate entropy/score.
     window_probe_every: int = 50

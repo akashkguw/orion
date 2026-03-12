@@ -1,5 +1,5 @@
 run:
-  out_dir: runs/exp_sparse_w64_d64_qk_ortho_spectral
+  out_dir: runs/exp_sparse_w64_d8_formula_lowcross
   seed: 123
   steps: 100
   log_every: 10
@@ -21,16 +21,15 @@ model:
 attention:
   backend: sparse
   window_size: 64
-  expander_degree: 64
+  expander_degree: 8
   sparse_impl: flex
   sparse_block_size: 64
   sparse_probe_every: 50
   sparse_probe_tokens: 256
-
-stability:
-  qk_norm: true
-  ortho_init: true
-  spectral_norm: true
+  expander_head_linear_coeff: 5
+  expander_head_quadratic_coeff: 11
+  expander_s2_coeff: 1
+  expander_sh_coeff: 1
 
 optim:
   lr: 3e-4
