@@ -24,7 +24,7 @@ attention:
   window_size: 16
   expander_degree: 8
   sparse_impl: flex
-  sparse_block_size: 128
+  sparse_block_size: 64
 
 optim:
   lr: 3e-4
